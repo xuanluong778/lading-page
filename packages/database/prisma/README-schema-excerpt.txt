@@ -1,0 +1,1 @@
+-- See packages/database/prisma/schema-landing-pages.excerpt.prisma for enums/models (extracted from full schema.prisma)

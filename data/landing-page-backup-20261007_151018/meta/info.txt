@@ -1,0 +1,16 @@
+created_at=2026-10-07T15:10:21+07:00
+project=/var/www/marketingaut_usr/data/www/marketingautoaz.com
+postgres_container=marketingspa-postgres-dev
+postgres_host=127.0.0.1:5434
+database=marketingspa
+user=marketingspa
+docker_volume=marketingspa_postgres_dev
+tables=landing_page_templates,landing_pages,landing_page_versions,landing_page_events
+landing_page_templates=200
+landing_pages=11
+landing_page_versions=5
+landing_page_events=104
+templates_system=200
+templates_custom=0
+assets_note=Template thumbnails live in apps/web/public/landing-pages/ (app bundle). Page image URLs in JSON specs may point to /uploads/ or external CDN; not included in this DB backup unless you copy upload storage separately.
+restore_doc=RESTORE.md
