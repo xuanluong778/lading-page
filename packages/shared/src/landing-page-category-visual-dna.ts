@@ -7,6 +7,11 @@ import type { LandingPageBlock, LandingPageCategory } from './landing-page-types
 import type { LandingPageThemeTokens } from './landing-page-types';
 import type { LandingPageDesignFamily } from './landing-page-template-foundation';
 import { getVerifiedBackdropPhotoIds } from './landing-page-verified-backdrops';
+import {
+  ensureReadable,
+  isDarkSurface,
+  LP_CONTRAST_INK,
+} from './landing-page-contrast';
 type ArchitectureVariantLike = { designFamily: LandingPageDesignFamily; variantIndex: number };
 
 type PaletteSlot = {
@@ -15,6 +20,10 @@ type PaletteSlot = {
   secondary?: string;
   background?: string;
   canvas?: string;
+  surface?: string;
+  surfaceAlt?: string;
+  accent?: string;
+  border?: string;
   fontFamily?: string;
   density?: LandingPageThemeTokens['density'];
   buttonStyle?: LandingPageThemeTokens['buttonStyle'];
@@ -25,68 +34,136 @@ type PaletteSlot = {
   radius?: string;
 };
 
+function parseHex(hex: string): [number, number, number] | null {
+  const h = hex.replace('#', '').trim();
+  if (h.length === 3) {
+    return [
+      parseInt(h[0]! + h[0]!, 16),
+      parseInt(h[1]! + h[1]!, 16),
+      parseInt(h[2]! + h[2]!, 16),
+    ];
+  }
+  if (h.length === 6) {
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+  return null;
+}
+
+function toHex(r: number, g: number, b: number): string {
+  return (
+    '#' +
+    [r, g, b]
+      .map((c) => Math.max(0, Math.min(255, Math.round(c))).toString(16).padStart(2, '0'))
+      .join('')
+  );
+}
+
+/** Mix two hex colors; t=0 → a, t=1 → b. */
+function mixHex(a: string, b: string, t: number): string {
+  const A = parseHex(a);
+  const B = parseHex(b);
+  if (!A || !B) return a;
+  return toHex(A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t);
+}
+
 function buildPalette(slot: PaletteSlot): Partial<LandingPageThemeTokens> {
   const secondary = slot.secondary || (slot.mode === 'dark' ? '#F8FAFC' : '#0F172A');
-  const muted = slot.mode === 'dark' ? '#94A3B8' : '#64748B';
-  const text = slot.mode === 'dark' ? '#F8FAFC' : secondary;
+  const accent = slot.accent || slot.primary;
+  const radius = slot.radius || (slot.mode === 'dark' ? '14px' : '12px');
 
   if (slot.mode === 'dark') {
-    const canvas = '#0B1220';
-    const surface = '#111827';
-    const surfaceAlt = '#1E293B';
+    const canvas = slot.canvas || mixHex('#0B0E14', slot.primary, 0.1);
+    const surface = slot.surface || mixHex('#12161F', slot.primary, 0.08);
+    const surfaceAlt = slot.surfaceAlt || mixHex('#1A2234', slot.primary, 0.16);
+    const border = slot.border || mixHex('#2A3348', slot.primary, 0.22);
+    const glow = mixHex(canvas, slot.primary, 0.45);
+    const text = ensureReadable(LP_CONTRAST_INK.DARK_INK, canvas, LP_CONTRAST_INK.AA_BODY);
+    const muted = ensureReadable(LP_CONTRAST_INK.DARK_MUTED, canvas, LP_CONTRAST_INK.AA_UI);
     const gradient =
       slot.gradient === 'none'
         ? 'none'
         : slot.gradient === 'auto' || !slot.gradient
-          ? `linear-gradient(145deg, ${canvas} 0%, ${surfaceAlt} 55%, ${surface} 100%)`
+          ? `radial-gradient(ellipse 85% 55% at 88% 8%, ${mixHex(glow, slot.primary, 0.35)}55 0%, transparent 55%), radial-gradient(ellipse 70% 50% at 8% 92%, ${mixHex(glow, secondary, 0.4)}40 0%, transparent 50%), linear-gradient(155deg, ${canvas} 0%, ${surfaceAlt} 48%, ${surface} 100%)`
           : slot.gradient;
+    const iconSurface = mixHex(surfaceAlt, slot.primary, 0.28);
     return {
       primary: slot.primary,
       secondary,
+      accent,
       background: canvas,
       canvas,
       surface,
       surfaceAlt,
       text,
       muted,
+      border,
+      button: slot.primary,
       gradient,
+      shadow: `0 18px 48px ${mixHex('#000000', slot.primary, 0.25)}66`,
+      shadowSm: '0 4px 16px rgba(0, 0, 0, 0.28)',
+      shadowMd: `0 14px 40px ${mixHex('#000000', slot.primary, 0.2)}55`,
+      shadowLg: `0 28px 72px ${mixHex('#000000', slot.primary, 0.28)}77`,
+      iconSurface,
+      iconColor: ensureReadable(slot.primary, iconSurface, LP_CONTRAST_INK.AA_UI),
       fontFamily: slot.fontFamily,
       density: slot.density,
-      buttonStyle: slot.buttonStyle,
+      buttonStyle: slot.buttonStyle || 'solid',
       imageTreatment: slot.imageTreatment,
-      fontWeightHeading: slot.fontWeightHeading,
+      fontWeightHeading: slot.fontWeightHeading ?? 800,
       fontSizeHero: slot.fontSizeHero,
-      radius: slot.radius,
+      radius,
+      radiusMd: radius,
+      radiusLg: `calc(${radius} + 6px)`,
     };
   }
 
-  const canvas = slot.canvas || '#F8FAFC';
-  const surface = slot.background || '#FFFFFF';
-  const surfaceAlt = '#F1F5F9';
+  const canvas = slot.canvas || mixHex('#F8FAFC', slot.primary, 0.06);
+  const surface = slot.surface || slot.background || '#FFFFFF';
+  const surfaceAlt = slot.surfaceAlt || mixHex('#F1F5F9', slot.primary, 0.12);
+  const border = slot.border || mixHex('#E2E8F0', slot.primary, 0.18);
+  // Prefer secondary when it already contrasts; otherwise force slate ink (AA).
+  const text = ensureReadable(
+    isDarkSurface(secondary) ? secondary : LP_CONTRAST_INK.LIGHT_INK,
+    surface,
+    LP_CONTRAST_INK.AA_BODY,
+  );
+  const muted = ensureReadable(LP_CONTRAST_INK.LIGHT_MUTED, surface, LP_CONTRAST_INK.AA_UI);
   const gradient =
     slot.gradient === 'none'
       ? 'none'
       : slot.gradient === 'auto' || !slot.gradient
-        ? `linear-gradient(160deg, ${surfaceAlt} 0%, ${surface} 45%, ${canvas} 100%)`
+        ? `radial-gradient(ellipse 80% 45% at 90% 0%, ${mixHex('#FFFFFF', slot.primary, 0.22)} 0%, transparent 55%), linear-gradient(165deg, ${surfaceAlt} 0%, ${surface} 42%, ${canvas} 100%)`
         : slot.gradient;
+  const iconSurface = mixHex(surface, slot.primary, 0.12);
 
   return {
     primary: slot.primary,
     secondary,
+    accent,
     background: surface,
     canvas,
     surface,
     surfaceAlt,
     text,
     muted,
+    border,
+    button: slot.primary,
     gradient,
+    shadow: `0 14px 40px ${mixHex('#0F172A', slot.primary, 0.35)}14`,
+    shadowSm: '0 4px 14px rgba(15, 23, 42, 0.06)',
+    shadowMd: `0 12px 36px ${mixHex('#0F172A', slot.primary, 0.3)}12`,
+    shadowLg: `0 24px 60px ${mixHex('#0F172A', slot.primary, 0.35)}16`,
+    iconSurface,
+    iconColor: ensureReadable(slot.primary, iconSurface, LP_CONTRAST_INK.AA_UI),
     fontFamily: slot.fontFamily,
     density: slot.density,
     buttonStyle: slot.buttonStyle,
     imageTreatment: slot.imageTreatment,
     fontWeightHeading: slot.fontWeightHeading,
     fontSizeHero: slot.fontSizeHero,
-    radius: slot.radius,
+    radius,
+    radiusMd: radius,
+    radiusLg: `calc(${radius} + 6px)`,
   };
 }
 
@@ -101,24 +178,186 @@ type CategoryVisualDna = {
   indexOverrides: Array<Partial<Record<LandingPageBlock['type'], string>>>;
 };
 
-/** Agency-style index override grid — leadForm tuned per conversion flow. */
+/**
+ * Per-index hero + section overrides — every row gets a distinct Hero so catalogs
+ * cannot collapse to centered/minimal wireframes.
+ */
 function richIndexOverrides(
   leadForm: string,
+  heroCycle: readonly string[],
   extras?: Partial<Record<LandingPageBlock['type'], string>>,
 ): Array<Partial<Record<LandingPageBlock['type'], string>>> {
   const lf = leadForm;
+  const h = (i: number) => heroCycle[i % heroCycle.length]!;
   return [
-    { Hero: 'editorial-overlay', LeadForm: lf, Features: 'editorial-list', CTA: 'split', ...extras },
-    { Testimonials: 'portrait-quotes', Guarantee: 'banner', LeadForm: lf, Features: 'icon-grid' },
-    { Pricing: 'comparison', FAQ: 'two-column', LeadForm: lf, CTA: 'banner' },
-    { Process: 'timeline', Features: 'numbered', LeadForm: lf, CTA: 'minimal' },
-    { Gallery: 'masonry', CTA: 'image-background', LeadForm: lf === 'booking' ? 'booking' : 'inline' },
-    { Hero: 'editorial-overlay', Features: 'alternating', LeadForm: lf, CTA: 'split' },
-    { FAQ: 'accordion', Guarantee: 'banner', LeadForm: lf },
-    { Header: 'minimal', Footer: 'columns', CTA: 'split', LeadForm: lf === 'card' ? 'floating-card' : lf },
-    { LeadForm: lf, Features: 'numbered', CTA: 'banner' },
-    { Features: 'minimal-list', CTA: 'minimal', LeadForm: lf === 'split' ? 'minimal' : lf },
+    { Hero: h(0), LeadForm: lf, Features: 'editorial-list', CTA: 'split', ...extras },
+    { Hero: h(1), Testimonials: 'portrait-quotes', Guarantee: 'banner', LeadForm: lf, Features: 'icon-grid' },
+    { Hero: h(2), Pricing: 'comparison', FAQ: 'two-column', LeadForm: lf, CTA: 'banner' },
+    { Hero: h(3), Process: 'timeline', Features: 'numbered', LeadForm: lf, CTA: 'minimal' },
+    { Hero: h(4), Gallery: 'masonry', CTA: 'image-background', LeadForm: lf === 'booking' ? 'booking' : 'inline' },
+    { Hero: h(5), Features: 'alternating', LeadForm: lf, CTA: 'split' },
+    { Hero: h(6), FAQ: 'accordion', Guarantee: 'banner', LeadForm: lf, Features: 'image-cards' },
+    { Hero: h(7), Header: 'minimal', Footer: 'columns', CTA: 'split', LeadForm: lf === 'card' ? 'floating-card' : lf },
+    { Hero: h(8), LeadForm: lf, Features: 'numbered', CTA: 'banner', Testimonials: 'metric-plus-quote' },
+    { Hero: h(9), Features: 'minimal-list', CTA: 'minimal', LeadForm: lf === 'split' ? 'minimal' : lf, Gallery: 'featured-plus-grid' },
   ];
+}
+
+/** Industry-tuned 10-slot hero cycles — rotated per variantIndex. */
+const HERO_CYCLE_SPA = [
+  'editorial-overlay',
+  'asymmetric',
+  'layered-cards',
+  'fullscreen-image',
+  'split-right',
+  'dark-cinematic',
+  'gradient-mesh',
+  'image-collage',
+  'floating-card',
+  'conversion-proof',
+] as const;
+const HERO_CYCLE_SAAS = [
+  'product-screenshot',
+  'gradient-mesh',
+  'layered-cards',
+  'conversion-proof',
+  'asymmetric',
+  'dark-cinematic',
+  'floating-card',
+  'image-collage',
+  'fullscreen-image',
+  'split-right',
+] as const;
+const HERO_CYCLE_CLINIC = [
+  'split-left',
+  'conversion-proof',
+  'floating-card',
+  'asymmetric',
+  'editorial-overlay',
+  'layered-cards',
+  'product-screenshot',
+  'fullscreen-image',
+  'split-right',
+  'gradient-mesh',
+] as const;
+const HERO_CYCLE_RESTAURANT = [
+  'fullscreen-image',
+  'image-collage',
+  'editorial-overlay',
+  'asymmetric',
+  'dark-cinematic',
+  'split-right',
+  'layered-cards',
+  'gradient-mesh',
+  'floating-card',
+  'conversion-proof',
+] as const;
+const HERO_CYCLE_FASHION = [
+  'editorial-overlay',
+  'asymmetric',
+  'image-collage',
+  'fullscreen-image',
+  'dark-cinematic',
+  'split-right',
+  'layered-cards',
+  'gradient-mesh',
+  'conversion-proof',
+  'floating-card',
+] as const;
+const HERO_CYCLE_REAL_ESTATE = [
+  'fullscreen-image',
+  'asymmetric',
+  'editorial-overlay',
+  'split-left',
+  'dark-cinematic',
+  'layered-cards',
+  'image-collage',
+  'gradient-mesh',
+  'floating-card',
+  'conversion-proof',
+] as const;
+const HERO_CYCLE_COURSE = [
+  'split-left',
+  'conversion-proof',
+  'layered-cards',
+  'product-screenshot',
+  'floating-card',
+  'asymmetric',
+  'editorial-overlay',
+  'gradient-mesh',
+  'fullscreen-image',
+  'split-right',
+] as const;
+const HERO_CYCLE_LOCAL = [
+  'conversion-proof',
+  'floating-card',
+  'split-left',
+  'asymmetric',
+  'layered-cards',
+  'editorial-overlay',
+  'fullscreen-image',
+  'gradient-mesh',
+  'image-collage',
+  'split-right',
+] as const;
+const HERO_CYCLE_CONVERSION = [
+  'conversion-proof',
+  'floating-card',
+  'layered-cards',
+  'gradient-mesh',
+  'split-left',
+  'asymmetric',
+  'product-screenshot',
+  'dark-cinematic',
+  'editorial-overlay',
+  'fullscreen-image',
+] as const;
+const HERO_CYCLE_DEFAULT = [
+  'asymmetric',
+  'image-collage',
+  'editorial-overlay',
+  'layered-cards',
+  'fullscreen-image',
+  'gradient-mesh',
+  'product-screenshot',
+  'conversion-proof',
+  'dark-cinematic',
+  'split-right',
+] as const;
+
+const CATEGORY_HERO_CYCLES: Partial<Record<LandingPageCategory, readonly string[]>> = {
+  spa: HERO_CYCLE_SPA,
+  cosmetics: HERO_CYCLE_SPA,
+  saas: HERO_CYCLE_SAAS,
+  demo: HERO_CYCLE_SAAS,
+  website: HERO_CYCLE_SAAS,
+  clinic: HERO_CYCLE_CLINIC,
+  restaurant: HERO_CYCLE_RESTAURANT,
+  fashion: HERO_CYCLE_FASHION,
+  product: HERO_CYCLE_FASHION,
+  real_estate: HERO_CYCLE_REAL_ESTATE,
+  course: HERO_CYCLE_COURSE,
+  webinar: HERO_CYCLE_COURSE,
+  coaching: HERO_CYCLE_COURSE,
+  ebook: HERO_CYCLE_COURSE,
+  service: HERO_CYCLE_LOCAL,
+  agency: HERO_CYCLE_LOCAL,
+  consulting: HERO_CYCLE_LOCAL,
+  quote: HERO_CYCLE_LOCAL,
+  seo: HERO_CYCLE_CONVERSION,
+  lead_magnet: HERO_CYCLE_CONVERSION,
+};
+
+/** Resolve premium hero for category × variantIndex (DNA SoT). */
+export function getCategoryHeroVariant(
+  category: LandingPageCategory | string,
+  variantIndex: number,
+): string {
+  const cycle = CATEGORY_HERO_CYCLES[category as LandingPageCategory] || HERO_CYCLE_DEFAULT;
+  const offset = Math.abs(
+    [...String(category)].reduce((a, c) => a + c.charCodeAt(0), 0),
+  );
+  return cycle[(variantIndex + offset) % cycle.length]!;
 }
 
 const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna>> = {
@@ -144,7 +383,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1542744173-8e7e53415bb0',
     ],
     designFamilies: ['corporate', 'conversion', 'bold', 'minimal', 'portfolio', 'conversion', 'corporate', 'conversion', 'conversion', 'editorial'],
-    indexOverrides: richIndexOverrides('card'),
+    indexOverrides: richIndexOverrides('card', HERO_CYCLE_CONVERSION),
   },
 
   website: {
@@ -169,7 +408,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1547658719-da2b51169166',
     ],
     designFamilies: ['portfolio', 'corporate', 'bold', 'minimal', 'portfolio', 'conversion', 'corporate', 'portfolio', 'conversion', 'editorial'],
-    indexOverrides: richIndexOverrides('split'),
+    indexOverrides: richIndexOverrides('split', HERO_CYCLE_SAAS),
   },
 
   service: {
@@ -194,32 +433,21 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1454165804606-c3d57bc86b40',
     ],
     designFamilies: ['local', 'corporate', 'conversion', 'minimal', 'portfolio', 'conversion', 'corporate', 'local', 'conversion', 'editorial'],
-    indexOverrides: [
-      { Hero: 'editorial-overlay', LeadForm: 'booking', Features: 'editorial-list', CTA: 'split' },
-      { Testimonials: 'portrait-quotes', Guarantee: 'banner', LeadForm: 'split', Features: 'icon-grid' },
-      { Pricing: 'comparison', FAQ: 'two-column', LeadForm: 'booking', CTA: 'banner' },
-      { Process: 'timeline', Features: 'numbered', LeadForm: 'card', CTA: 'minimal' },
-      { Gallery: 'masonry', CTA: 'image-background', LeadForm: 'inline' },
-      { Hero: 'editorial-overlay', Features: 'alternating', LeadForm: 'floating-card', CTA: 'split' },
-      { FAQ: 'accordion', Guarantee: 'banner', LeadForm: 'booking' },
-      { Header: 'minimal', Footer: 'columns', CTA: 'split', LeadForm: 'split' },
-      { LeadForm: 'booking', Features: 'numbered', CTA: 'banner' },
-      { Features: 'minimal-list', CTA: 'minimal', LeadForm: 'card' },
-    ],
+    indexOverrides: richIndexOverrides('booking', HERO_CYCLE_LOCAL),
   },
 
   course: {
     palettes: palettes([
-      { mode: 'light', primary: '#7C3AED', secondary: '#5B21B6', density: 'spacious', fontFamily: '"Fraunces", serif' },
-      { mode: 'light', primary: '#2563EB', secondary: '#1E40AF', density: 'comfortable' },
-      { mode: 'light', primary: '#EA580C', secondary: '#C2410C', fontWeightHeading: 900 },
-      { mode: 'light', primary: '#0F172A', buttonStyle: 'outline', gradient: 'none' },
-      { mode: 'dark', primary: '#A78BFA', imageTreatment: 'editorial' },
-      { mode: 'light', primary: '#0891B2', secondary: '#155E75' },
-      { mode: 'light', primary: '#059669', secondary: '#047857', density: 'spacious' },
-      { mode: 'dark', primary: '#F97316', fontWeightHeading: 800 },
-      { mode: 'light', primary: '#DB2777', secondary: '#9D174D' },
-      { mode: 'light', primary: '#404040', buttonStyle: 'outline', fontSizeHero: 'clamp(1.9rem, 4vw, 2.9rem)' },
+      { mode: 'dark', primary: '#EC4899', secondary: '#A855F7', accent: '#22D3EE', density: 'spacious', fontFamily: '"Plus Jakarta Sans", sans-serif', fontWeightHeading: 800, radius: '16px', imageTreatment: 'editorial' },
+      { mode: 'light', primary: '#7C3AED', secondary: '#5B21B6', density: 'spacious', fontFamily: '"Fraunces", serif', radius: '14px' },
+      { mode: 'light', primary: '#2563EB', secondary: '#1E40AF', density: 'comfortable', canvas: '#EFF6FF' },
+      { mode: 'dark', primary: '#22D3EE', secondary: '#A78BFA', accent: '#EC4899', fontWeightHeading: 800, radius: '16px' },
+      { mode: 'light', primary: '#EA580C', secondary: '#C2410C', fontWeightHeading: 900, canvas: '#FFF7ED' },
+      { mode: 'light', primary: '#0F172A', buttonStyle: 'outline', gradient: 'none', radius: '8px' },
+      { mode: 'dark', primary: '#A78BFA', secondary: '#F472B6', imageTreatment: 'editorial', density: 'spacious' },
+      { mode: 'light', primary: '#0891B2', secondary: '#155E75', canvas: '#ECFEFF' },
+      { mode: 'light', primary: '#059669', secondary: '#047857', density: 'spacious', canvas: '#ECFDF5' },
+      { mode: 'dark', primary: '#F97316', secondary: '#FBBF24', fontWeightHeading: 800, radius: '14px' },
     ]),
     images: [
       'photo-1524178232363-1fb2b075b655',
@@ -230,7 +458,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1523240795612-9a054b0db644',
     ],
     designFamilies: ['conversion', 'corporate', 'bold', 'minimal', 'portfolio', 'conversion', 'corporate', 'conversion', 'conversion', 'editorial'],
-    indexOverrides: richIndexOverrides('split'),
+    indexOverrides: richIndexOverrides('split', HERO_CYCLE_COURSE),
   },
 
   webinar: {
@@ -255,7 +483,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1505373877841-8d25f7d46678',
     ],
     designFamilies: ['conversion', 'corporate', 'bold', 'minimal', 'portfolio', 'conversion', 'corporate', 'conversion', 'conversion', 'editorial'],
-    indexOverrides: richIndexOverrides('compact'),
+    indexOverrides: richIndexOverrides('compact', HERO_CYCLE_COURSE),
   },
 
   coaching: {
@@ -280,7 +508,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1518611012118-696072aa579a',
     ],
     designFamilies: ['conversion', 'local', 'bold', 'minimal', 'portfolio', 'conversion', 'corporate', 'conversion', 'conversion', 'editorial'],
-    indexOverrides: richIndexOverrides('split'),
+    indexOverrides: richIndexOverrides('split', HERO_CYCLE_COURSE),
   },
 
   consulting: {
@@ -305,7 +533,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1556761175-5973dc0f32e7',
     ],
     designFamilies: ['corporate', 'corporate', 'conversion', 'minimal', 'portfolio', 'conversion', 'corporate', 'conversion', 'conversion', 'editorial'],
-    indexOverrides: richIndexOverrides('split'),
+    indexOverrides: richIndexOverrides('split', HERO_CYCLE_LOCAL),
   },
 
   quote: {
@@ -330,7 +558,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1503387762-592deb58ef4e',
     ],
     designFamilies: ['conversion', 'corporate', 'bold', 'minimal', 'local', 'conversion', 'corporate', 'conversion', 'conversion', 'editorial'],
-    indexOverrides: richIndexOverrides('split'),
+    indexOverrides: richIndexOverrides('split', HERO_CYCLE_LOCAL),
   },
 
   ebook: {
@@ -355,18 +583,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1524995992477-879a36b4ae91',
     ],
     designFamilies: ['editorial', 'conversion', 'bold', 'minimal', 'portfolio', 'conversion', 'corporate', 'conversion', 'conversion', 'minimal'],
-    indexOverrides: [
-      { Hero: 'editorial-overlay', LeadForm: 'inline', Features: 'editorial-list', CTA: 'split' },
-      { Testimonials: 'portrait-quotes', Guarantee: 'banner', LeadForm: 'compact', Features: 'icon-grid' },
-      { Pricing: 'comparison', FAQ: 'two-column', LeadForm: 'split', CTA: 'banner' },
-      { Process: 'timeline', Features: 'numbered', LeadForm: 'card', CTA: 'minimal' },
-      { Gallery: 'masonry', CTA: 'image-background', LeadForm: 'inline' },
-      { Hero: 'editorial-overlay', Features: 'alternating', LeadForm: 'floating-card', CTA: 'split' },
-      { FAQ: 'accordion', Guarantee: 'banner', LeadForm: 'compact' },
-      { Header: 'minimal', Footer: 'columns', CTA: 'split', LeadForm: 'split' },
-      { LeadForm: 'inline', Features: 'numbered', CTA: 'banner' },
-      { Features: 'minimal-list', CTA: 'minimal', LeadForm: 'card' },
-    ],
+    indexOverrides: richIndexOverrides('inline', HERO_CYCLE_COURSE),
   },
 
   demo: {
@@ -391,7 +608,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1498050108023-c5249f4df085',
     ],
     designFamilies: ['conversion', 'corporate', 'bold', 'minimal', 'portfolio', 'conversion', 'corporate', 'conversion', 'conversion', 'editorial'],
-    indexOverrides: richIndexOverrides('floating-card'),
+    indexOverrides: richIndexOverrides('floating-card', HERO_CYCLE_SAAS),
   },
 
   lead_magnet: {
@@ -416,7 +633,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1552664730-d307ca884978',
     ],
     designFamilies: ['conversion', 'corporate', 'bold', 'minimal', 'portfolio', 'conversion', 'corporate', 'conversion', 'conversion', 'minimal'],
-    indexOverrides: richIndexOverrides('compact'),
+    indexOverrides: richIndexOverrides('compact', HERO_CYCLE_CONVERSION),
   },
 
   product: {
@@ -441,18 +658,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1491553895911-67a25a47a089',
     ],
     designFamilies: ['product', 'minimal', 'bold', 'conversion', 'portfolio', 'conversion', 'corporate', 'product', 'conversion', 'editorial'],
-    indexOverrides: [
-      { Hero: 'editorial-overlay', LeadForm: 'inline', Features: 'editorial-list', CTA: 'split' },
-      { Testimonials: 'portrait-quotes', Guarantee: 'banner', LeadForm: 'compact', Features: 'icon-grid' },
-      { Pricing: 'comparison', FAQ: 'two-column', LeadForm: 'split', CTA: 'banner' },
-      { Process: 'timeline', Features: 'numbered', LeadForm: 'card', CTA: 'minimal' },
-      { Gallery: 'masonry', CTA: 'image-background', LeadForm: 'inline' },
-      { Hero: 'editorial-overlay', Features: 'alternating', LeadForm: 'floating-card', CTA: 'split' },
-      { FAQ: 'accordion', Guarantee: 'banner', LeadForm: 'compact' },
-      { Header: 'minimal', Footer: 'columns', CTA: 'split', LeadForm: 'split' },
-      { LeadForm: 'inline', Features: 'numbered', CTA: 'banner' },
-      { Features: 'minimal-list', CTA: 'minimal', LeadForm: 'card' },
-    ],
+    indexOverrides: richIndexOverrides('inline', HERO_CYCLE_FASHION),
   },
 
   cosmetics: {
@@ -477,18 +683,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1596755389378-c179efa9a2c0',
     ],
     designFamilies: ['luxury', 'organic', 'bold', 'minimal', 'portfolio', 'conversion', 'luxury', 'organic', 'conversion', 'editorial'],
-    indexOverrides: [
-      { Hero: 'editorial-overlay', LeadForm: 'inline', Features: 'editorial-list', CTA: 'split' },
-      { Testimonials: 'portrait-quotes', Guarantee: 'banner', LeadForm: 'compact', Features: 'icon-grid' },
-      { Pricing: 'comparison', FAQ: 'two-column', LeadForm: 'split', CTA: 'banner' },
-      { Process: 'timeline', Features: 'numbered', LeadForm: 'card', CTA: 'minimal' },
-      { Gallery: 'masonry', CTA: 'image-background', LeadForm: 'inline' },
-      { Hero: 'editorial-overlay', Features: 'alternating', LeadForm: 'floating-card', CTA: 'split' },
-      { FAQ: 'accordion', Guarantee: 'banner', LeadForm: 'compact' },
-      { Header: 'minimal', Footer: 'columns', CTA: 'split', LeadForm: 'split' },
-      { LeadForm: 'inline', Features: 'numbered', CTA: 'banner' },
-      { Features: 'minimal-list', CTA: 'minimal', LeadForm: 'card' },
-    ],
+    indexOverrides: richIndexOverrides('booking', HERO_CYCLE_SPA),
   },
 
   fashion: {
@@ -513,32 +708,21 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1558618666-fcd25c85cd64',
     ],
     designFamilies: ['luxury', 'minimal', 'bold', 'editorial', 'portfolio', 'conversion', 'luxury', 'product', 'conversion', 'editorial'],
-    indexOverrides: [
-      { Hero: 'editorial-overlay', LeadForm: 'inline', Features: 'editorial-list', CTA: 'split' },
-      { Testimonials: 'portrait-quotes', Guarantee: 'banner', LeadForm: 'compact', Features: 'icon-grid' },
-      { Pricing: 'comparison', FAQ: 'two-column', LeadForm: 'split', CTA: 'banner' },
-      { Process: 'timeline', Features: 'numbered', LeadForm: 'card', CTA: 'minimal' },
-      { Gallery: 'masonry', CTA: 'image-background', LeadForm: 'inline' },
-      { Hero: 'editorial-overlay', Features: 'alternating', LeadForm: 'floating-card', CTA: 'split' },
-      { FAQ: 'accordion', Guarantee: 'banner', LeadForm: 'compact' },
-      { Header: 'minimal', Footer: 'columns', CTA: 'split', LeadForm: 'split' },
-      { LeadForm: 'inline', Features: 'numbered', CTA: 'banner' },
-      { Features: 'minimal-list', CTA: 'minimal', LeadForm: 'card' },
-    ],
+    indexOverrides: richIndexOverrides('inline', HERO_CYCLE_FASHION),
   },
 
   restaurant: {
     palettes: palettes([
-      { mode: 'dark', primary: '#D97706', secondary: '#FEF3C7', density: 'spacious', fontFamily: '"Fraunces", serif', imageTreatment: 'photo-real' },
-      { mode: 'light', primary: '#DC2626', secondary: '#991B1B', density: 'comfortable' },
-      { mode: 'light', primary: '#059669', secondary: '#047857' },
-      { mode: 'light', primary: '#0F172A', buttonStyle: 'outline', gradient: 'none' },
-      { mode: 'dark', primary: '#EA580C', fontWeightHeading: 800 },
-      { mode: 'light', primary: '#B45309', secondary: '#92400E' },
-      { mode: 'light', primary: '#7C2D12', secondary: '#431407', density: 'spacious' },
-      { mode: 'dark', primary: '#FB923C' },
-      { mode: 'light', primary: '#CA8A04', secondary: '#854D0E', fontWeightHeading: 900 },
-      { mode: 'light', primary: '#57534E', buttonStyle: 'outline' },
+      { mode: 'dark', primary: '#D97706', secondary: '#FEF3C7', accent: '#F59E0B', density: 'spacious', fontFamily: '"Fraunces", serif', imageTreatment: 'photo-real', radius: '14px', canvas: '#0C0A09' },
+      { mode: 'light', primary: '#DC2626', secondary: '#991B1B', density: 'comfortable', canvas: '#FEF2F2', radius: '12px' },
+      { mode: 'light', primary: '#059669', secondary: '#047857', canvas: '#ECFDF5' },
+      { mode: 'light', primary: '#0F172A', buttonStyle: 'outline', gradient: 'none', radius: '8px' },
+      { mode: 'dark', primary: '#EA580C', secondary: '#FDBA74', fontWeightHeading: 800, radius: '14px', canvas: '#1C1917' },
+      { mode: 'light', primary: '#B45309', secondary: '#92400E', canvas: '#FFFBEB', radius: '12px' },
+      { mode: 'light', primary: '#7C2D12', secondary: '#431407', density: 'spacious', canvas: '#FFF7ED', radius: '14px' },
+      { mode: 'dark', primary: '#FB923C', secondary: '#FED7AA', accent: '#DC2626', radius: '16px' },
+      { mode: 'light', primary: '#CA8A04', secondary: '#854D0E', fontWeightHeading: 900, canvas: '#FEFCE8' },
+      { mode: 'light', primary: '#57534E', buttonStyle: 'outline', canvas: '#FAFAF9' },
     ]),
     images: [
       'photo-1517248135467-4c7edcad34c4',
@@ -549,32 +733,21 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1550966841-3eeb8c938e7b',
     ],
     designFamilies: ['luxury', 'local', 'conversion', 'minimal', 'portfolio', 'conversion', 'organic', 'local', 'conversion', 'editorial'],
-    indexOverrides: [
-      { Hero: 'editorial-overlay', LeadForm: 'booking', Features: 'editorial-list', CTA: 'split' },
-      { Testimonials: 'portrait-quotes', Guarantee: 'banner', LeadForm: 'split', Features: 'icon-grid' },
-      { Pricing: 'comparison', FAQ: 'two-column', LeadForm: 'booking', CTA: 'banner' },
-      { Process: 'timeline', Features: 'numbered', LeadForm: 'card', CTA: 'minimal' },
-      { Gallery: 'masonry', CTA: 'image-background', LeadForm: 'inline' },
-      { Hero: 'editorial-overlay', Features: 'alternating', LeadForm: 'floating-card', CTA: 'split' },
-      { FAQ: 'accordion', Guarantee: 'banner', LeadForm: 'booking' },
-      { Header: 'minimal', Footer: 'columns', CTA: 'split', LeadForm: 'split' },
-      { LeadForm: 'booking', Features: 'numbered', CTA: 'banner' },
-      { Features: 'minimal-list', CTA: 'minimal', LeadForm: 'card' },
-    ],
+    indexOverrides: richIndexOverrides('booking', HERO_CYCLE_RESTAURANT),
   },
 
   real_estate: {
     palettes: palettes([
-      { mode: 'dark', primary: '#D97706', secondary: '#FEF3C7', density: 'spacious', fontFamily: '"Fraunces", serif' },
-      { mode: 'light', primary: '#1E3A8A', secondary: '#1E40AF', density: 'comfortable', fontFamily: '"Manrope", sans-serif' },
-      { mode: 'light', primary: '#059669', secondary: '#047857' },
-      { mode: 'light', primary: '#0F172A', buttonStyle: 'outline', gradient: 'none' },
-      { mode: 'dark', primary: '#F59E0B', imageTreatment: 'editorial', fontWeightHeading: 800 },
-      { mode: 'light', primary: '#0284C7', secondary: '#0369A1' },
-      { mode: 'light', primary: '#7C3AED', secondary: '#6D28D9' },
-      { mode: 'dark', primary: '#60A5FA' },
-      { mode: 'light', primary: '#B45309', secondary: '#92400E', fontWeightHeading: 900 },
-      { mode: 'light', primary: '#44403C', buttonStyle: 'outline' },
+      { mode: 'dark', primary: '#D97706', secondary: '#FEF3C7', density: 'spacious', fontFamily: '"Fraunces", serif', radius: '12px', canvas: '#0C0A09', imageTreatment: 'editorial' },
+      { mode: 'light', primary: '#1E3A8A', secondary: '#1E40AF', density: 'comfortable', fontFamily: '"Manrope", sans-serif', canvas: '#EFF6FF', radius: '10px' },
+      { mode: 'light', primary: '#059669', secondary: '#047857', canvas: '#ECFDF5' },
+      { mode: 'light', primary: '#0F172A', buttonStyle: 'outline', gradient: 'none', radius: '8px' },
+      { mode: 'dark', primary: '#F59E0B', secondary: '#FDE68A', imageTreatment: 'editorial', fontWeightHeading: 800, radius: '12px' },
+      { mode: 'light', primary: '#0284C7', secondary: '#0369A1', canvas: '#F0F9FF' },
+      { mode: 'light', primary: '#7C3AED', secondary: '#6D28D9', canvas: '#F5F3FF' },
+      { mode: 'dark', primary: '#60A5FA', secondary: '#BFDBFE', accent: '#F59E0B', radius: '12px' },
+      { mode: 'light', primary: '#B45309', secondary: '#92400E', fontWeightHeading: 900, canvas: '#FFFBEB' },
+      { mode: 'light', primary: '#44403C', buttonStyle: 'outline', canvas: '#FAFAF9' },
     ]),
     images: [
       'photo-1600596542815-ffad4c1539a9',
@@ -585,21 +758,21 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1605276374104-de6862b9b645',
     ],
     designFamilies: ['luxury', 'local', 'conversion', 'minimal', 'portfolio', 'conversion', 'corporate', 'local', 'conversion', 'editorial'],
-    indexOverrides: richIndexOverrides('booking'),
+    indexOverrides: richIndexOverrides('booking', HERO_CYCLE_REAL_ESTATE),
   },
 
   spa: {
     palettes: palettes([
-      { mode: 'light', primary: '#0D9488', secondary: '#134E4A', density: 'spacious', fontFamily: '"Fraunces", serif', radius: '14px', imageTreatment: 'editorial' },
-      { mode: 'light', primary: '#A8A29E', secondary: '#57534E', density: 'comfortable', buttonStyle: 'outline', gradient: 'none' },
-      { mode: 'light', primary: '#0284C7', secondary: '#0C4A6E', imageTreatment: 'photo-real' },
-      { mode: 'dark', primary: '#D97706', secondary: '#FEF3C7', fontWeightHeading: 800, imageTreatment: 'editorial' },
-      { mode: 'light', primary: '#059669', secondary: '#065F46', density: 'spacious' },
-      { mode: 'dark', primary: '#14B8A6', imageTreatment: 'editorial' },
-      { mode: 'light', primary: '#BE185D', secondary: '#9D174D' },
-      { mode: 'dark', primary: '#F472B6' },
-      { mode: 'light', primary: '#CA8A04', secondary: '#854D0E', fontWeightHeading: 900 },
-      { mode: 'light', primary: '#44403C', buttonStyle: 'outline', fontSizeHero: 'clamp(2rem, 4.5vw, 3.2rem)' },
+      { mode: 'light', primary: '#0D9488', secondary: '#134E4A', density: 'spacious', fontFamily: '"Fraunces", serif', radius: '20px', imageTreatment: 'editorial', canvas: '#F0FDFA' },
+      { mode: 'light', primary: '#A8A29E', secondary: '#57534E', density: 'comfortable', buttonStyle: 'outline', gradient: 'none', radius: '14px', canvas: '#FAFAF9' },
+      { mode: 'light', primary: '#0284C7', secondary: '#0C4A6E', imageTreatment: 'photo-real', canvas: '#F0F9FF', radius: '18px' },
+      { mode: 'dark', primary: '#D97706', secondary: '#FEF3C7', fontWeightHeading: 800, imageTreatment: 'editorial', radius: '18px', canvas: '#1C1917' },
+      { mode: 'light', primary: '#059669', secondary: '#065F46', density: 'spacious', canvas: '#ECFDF5', radius: '18px' },
+      { mode: 'dark', primary: '#14B8A6', secondary: '#F9A8D4', imageTreatment: 'editorial', radius: '20px' },
+      { mode: 'light', primary: '#BE185D', secondary: '#9D174D', canvas: '#FDF2F8', radius: '18px' },
+      { mode: 'dark', primary: '#F472B6', secondary: '#5EEAD4', density: 'spacious', radius: '20px' },
+      { mode: 'light', primary: '#CA8A04', secondary: '#854D0E', fontWeightHeading: 900, canvas: '#FFFBEB', radius: '16px' },
+      { mode: 'light', primary: '#44403C', buttonStyle: 'outline', fontSizeHero: 'clamp(2rem, 4.5vw, 3.2rem)', radius: '12px' },
     ]),
     images: [
       'photo-1540555700478-4be289fbecef',
@@ -610,7 +783,7 @@ const CATEGORY_VISUAL_DNA: Partial<Record<LandingPageCategory, CategoryVisualDna
       'photo-1610639535210-6dbd866d5c67',
     ],
     designFamilies: ['luxury', 'minimal', 'corporate', 'bold', 'organic', 'conversion', 'portfolio', 'local', 'editorial', 'corporate'],
-    indexOverrides: richIndexOverrides('booking'),
+    indexOverrides: richIndexOverrides('booking', HERO_CYCLE_SPA),
   },
 };
 

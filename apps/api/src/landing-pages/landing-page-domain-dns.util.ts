@@ -8,6 +8,7 @@ import {
   normalizeSenderDomain,
   isValidSenderDomain,
 } from '../email-marketing/email-domain-dns.util';
+import { execFileSync, spawn } from 'node:child_process';
 import { Resolver } from 'node:dns/promises';
 
 /** Default CNAME/ALIAS target for MarketingAutoAZ landing pages. Override via env. */
@@ -177,4 +178,28 @@ export function landingPageDnsInstructions(domain: string): LandingPageDnsInstru
 /** Reserved for future SSL provisioning checks. */
 export async function lookupDomainTxt(name: string): Promise<string[]> {
   return lookupTxt(name);
+}
+
+const CUSTOM_DOMAIN_PROVISIONER = '/usr/local/sbin/lp-custom-domain-sync';
+
+/** Fail closed: DNS pointing at the edge is not enough if the host is already another site. */
+export function customDomainMayProvision(domain: string): boolean {
+  try {
+    execFileSync(CUSTOM_DOMAIN_PROVISIONER, ['--guard', domain], {
+      timeout: 8000,
+      stdio: 'pipe',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function requestCustomDomainSync(): void {
+  try {
+    const child = spawn(CUSTOM_DOMAIN_PROVISIONER, [], { detached: true, stdio: 'ignore' });
+    child.unref();
+  } catch {
+    // systemd timer reconciles ACTIVE domains
+  }
 }

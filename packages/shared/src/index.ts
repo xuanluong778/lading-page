@@ -102,6 +102,7 @@ export * from './landing-page-template-expand';
 export * from './landing-page-form-fields-by-goal';
 export * from './landing-page-verified-backdrops';
 export * from './landing-page-section-shells';
+export * from './landing-page-contrast';
 export * from './landing-page-design-tokens';
 export * from './landing-page-category-visual-dna';
 export * from './landing-page-template-validators';

@@ -47,8 +47,13 @@ function buildElementHiddenCss(spec: LandingPageSpec): string | null {
     if (sep <= 0) continue;
     const blockId = key.slice(0, sep).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const field = key.slice(sep + 2).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    // Inline text fields (headline, trustPoint:N, …)
     rules.push(
       `[data-lp-block-id="${blockId}"] [data-lp-inline-field="${field}"]{display:none!important}`,
+    );
+    // Element chrome (Hero trust icons, boxes keyed by data-lp-element-id)
+    rules.push(
+      `[data-lp-block-id="${blockId}"] [data-lp-element-id="${blockId}::${field}"]{display:none!important}`,
     );
   }
   return rules.length ? rules.join('\n') : null;
@@ -115,6 +120,7 @@ function showCanvasInlineField(
   const sel = canvas.selection;
   if (sel?.blockId !== blockId) return false;
   if (sel.field === field) return true;
+  if (field === 'ctaLabel' && sel.element === 'cta') return true;
   if (!sel.field && String(sel.element || '') === field) return true;
   return false;
 }
@@ -384,8 +390,13 @@ function IconBubble({ index, primary }: { index: number; primary: string }) {
   const d = ICON_SVGS[index % ICON_SVGS.length];
   return (
     <span
-      className="inline-flex h-11 w-11 items-center justify-center rounded-xl"
-      style={{ background: `${primary}18`, color: primary }}
+      data-lp-icon-bubble="1"
+      className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
+      style={{
+        background: `var(--lp-icon-surface, color-mix(in srgb, ${primary} 16%, var(--lp-surface)))`,
+        color: `var(--lp-icon-color, ${primary})`,
+        boxShadow: 'inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent)',
+      }}
     >
       <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden>
         <path d={d} />
@@ -394,16 +405,84 @@ function IconBubble({ index, primary }: { index: number; primary: string }) {
   );
 }
 
-function CheckItem({ text, primary }: { text: string; primary: string }) {
-  return (
-    <li className="flex items-start gap-2 text-sm md:text-base" style={{ color: 'var(--lp-text)' }}>
-      <span
-        className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
-        style={{ background: primary }}
+function CheckItem({
+  primary,
+  children,
+  text,
+  blockId,
+  index,
+  canvas,
+  blockStyle,
+}: {
+  primary: string;
+  children?: ReactNode;
+  text?: string;
+  blockId?: string;
+  index?: number;
+  canvas?: LandingPageCanvasHandlers | null;
+  blockStyle?: Record<string, unknown> | null;
+}) {
+  const elementKey =
+    blockId != null && index != null ? (`item:trust-icon-${index}` as const) : null;
+  const iconIdMap =
+    blockStyle && typeof blockStyle.elementIconIds === 'object' && blockStyle.elementIconIds
+      ? (blockStyle.elementIconIds as Record<string, unknown>)
+      : {};
+  const glyphId = elementKey ? String(iconIdMap[elementKey] || 'check') : 'check';
+  const glyph =
+    glyphId === 'star'
+      ? '★'
+      : glyphId === 'heart'
+        ? '♥'
+        : glyphId === 'bolt'
+          ? '⚡'
+          : glyphId === 'plus'
+            ? '+'
+            : glyphId === 'arrow'
+              ? '→'
+              : glyphId === 'dot'
+                ? '●'
+                : glyphId === 'shield'
+                  ? '🛡'
+                  : '✓';
+
+  const icon = (
+    <span
+      data-lp-trust-icon={index != null ? String(index) : undefined}
+      data-lp-box-hit={canvas && blockId != null && index != null ? '1' : undefined}
+      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+      style={{ background: primary }}
+      aria-hidden
+    >
+      {glyph}
+    </span>
+  );
+
+  // Always wrap so publish path also applies elementCustomCss / ElementChrome styles.
+  const iconNode =
+    blockId != null && index != null && elementKey ? (
+      <ElementChrome
+        blockId={blockId}
+        element={elementKey}
+        handlers={canvas}
+        kind="box"
+        blockStyle={blockStyle}
+        className="mt-0.5 inline-flex shrink-0"
       >
-        ✓
-      </span>
-      <span>{text}</span>
+        {icon}
+      </ElementChrome>
+    ) : (
+      <span className="mt-0.5 inline-flex shrink-0">{icon}</span>
+    );
+
+  return (
+    <li
+      className="flex items-start gap-2 text-sm md:text-base"
+      style={{ color: 'var(--lp-text)' }}
+      data-lp-trust-row={index != null ? String(index) : undefined}
+    >
+      {iconNode}
+      <div className="min-w-0 flex-1">{children ?? <span>{text}</span>}</div>
     </li>
   );
 }
@@ -438,17 +517,17 @@ function HeroVisual({
               : 'Hero visual';
   if (imageUrl) {
     return (
-      <div className="relative mx-auto w-full max-w-full md:max-w-md" data-lp-hero-visual="1">
+      <div className="relative mx-auto w-full max-w-full" data-lp-hero-visual="1">
         <LpContentImage
           src={imageUrl}
           alt={imageStyle?.alt || ''}
           fallbackLabel={visualLabel}
-          width={480}
-          height={600}
+          width={960}
+          height={720}
           loading="eager"
           fetchPriority="high"
           decoding="async"
-          className="aspect-[4/5] w-full max-w-full object-cover shadow-lg"
+          className="aspect-[4/5] w-full max-w-full object-cover shadow-lg md:aspect-[5/6]"
           data-lp-img-motion={lpImgMotionAttr(imageStyle)}
           style={{
             borderRadius: imageStyle?.borderRadius || 'var(--lp-radius)',
@@ -475,7 +554,7 @@ function HeroVisual({
   // Decorative placeholder — not fake customer photo
   return (
     <div
-      className="relative mx-auto flex aspect-[4/5] w-full max-w-full flex-col items-center justify-end overflow-hidden p-6 md:max-w-md"
+      className="relative mx-auto flex aspect-[4/5] w-full max-w-full flex-col items-center justify-end overflow-hidden p-6 md:aspect-[5/6]"
       data-lp-hero-visual="1"
       style={{
         borderRadius: 'var(--lp-radius)',
@@ -545,7 +624,7 @@ function LeadFormCard({
   const inputBorder = theme.inputBorder || '1px solid rgba(0,0,0,0.1)';
   const inputColor = theme.inputColor || '#171717';
   const buttonBg = theme.buttonBg || primary;
-  const buttonColor = theme.buttonColor || '#fff';
+  const buttonColor = theme.buttonColor || 'var(--lp-on-primary, #fff)';
   const optionBg = theme.optionBg || 'rgba(0,0,0,0.06)';
   const optionBorder = theme.optionBorder || '1px solid transparent';
   const titleFont =
@@ -971,7 +1050,7 @@ function HeroBlock({
           : ['Tư vấn rõ ràng', 'Phản hồi nhanh', 'Cam kết minh bạch'];
 
   const eventMeta = [block.eventDate, block.eventTime, block.eventFormat].filter(Boolean) as string[];
-  const showTrust = composition !== 'minimal-copy';
+  const showTrust = composition !== 'minimal-copy' && composition !== 'conversion-proof' && composition !== 'dark-cinematic';
 
   const renderHeadline = (className: string) =>
     showCanvasInlineField(block.headline, canvas, block.id, 'headline') ? (
@@ -984,7 +1063,7 @@ function HeroBlock({
         blockStyle={(block.style || {}) as Record<string, unknown>}
         textRole="heading"
         className={className}
-        style={{ color: 'var(--lp-secondary)', fontSize: 'var(--lp-fs-hero)' }}
+        style={{ color: 'var(--lp-text)', fontSize: 'var(--lp-fs-hero)' }}
       />
     ) : null;
 
@@ -1014,14 +1093,22 @@ function HeroBlock({
         handlers={canvas}
         blockStyle={(block.style || {}) as Record<string, unknown>}
         textRole="button"
-        className="inline-flex min-h-[48px] items-center gap-2 px-7 py-3.5 text-sm font-extrabold text-white shadow-lg md:text-base"
-        style={{ background: primary, borderRadius: 'var(--lp-button-radius, calc(var(--lp-radius) - 2px))' }}
+        className="inline-flex min-h-[48px] items-center gap-2 px-7 py-3.5 text-sm font-extrabold shadow-lg md:text-base"
+        style={{
+          background: primary,
+          color: 'var(--lp-on-primary, #fff)',
+          borderRadius: 'var(--lp-button-radius, calc(var(--lp-radius) - 2px))',
+        }}
       />
     ) : (
       <a
         href={block.ctaUrl || '#lead-form'}
-        className="inline-flex min-h-[48px] items-center gap-2 px-7 py-3.5 text-sm font-extrabold text-white shadow-lg transition hover:brightness-105 md:text-base"
-        style={{ background: primary, borderRadius: 'var(--lp-button-radius, calc(var(--lp-radius) - 2px))' }}
+        className="inline-flex min-h-[48px] items-center gap-2 px-7 py-3.5 text-sm font-extrabold shadow-lg transition hover:brightness-105 md:text-base"
+        style={{
+          background: primary,
+          color: 'var(--lp-on-primary, #fff)',
+          borderRadius: 'var(--lp-button-radius, calc(var(--lp-radius) - 2px))',
+        }}
       >
         <InlineEditable
           as="span"
@@ -1094,8 +1181,31 @@ function HeroBlock({
 
   const trustList = showTrust ? (
     <ul className="mt-5 space-y-2.5 md:mt-6" data-lp-hero-trust="1">
-      {defaultTrust.map((t) => (
-        <CheckItem key={t} text={t} primary={primary} />
+      {defaultTrust.map((t, i) => (
+        <CheckItem
+          key={`trust-${i}`}
+          primary={primary}
+          blockId={block.id}
+          index={i}
+          canvas={canvas}
+          blockStyle={(block.style || {}) as Record<string, unknown>}
+        >
+          {canvas ? (
+            <InlineEditable
+              as="span"
+              blockId={block.id}
+              field={`trustPoint:${i}`}
+              value={t}
+              handlers={canvas}
+              blockStyle={(block.style || {}) as Record<string, unknown>}
+              textRole="paragraph"
+              className="text-sm leading-snug md:text-base"
+              style={{ color: 'var(--lp-text)' }}
+            />
+          ) : (
+            <span>{t}</span>
+          )}
+        </CheckItem>
       ))}
     </ul>
   ) : null;
@@ -1183,12 +1293,29 @@ function HeroBlock({
       <section
         className={`${spacingClass(block.spacing)} relative overflow-hidden px-4 sm:px-6 py-16 md:py-24`}
         style={sectionBgStyle(block)}
-        data-lp-section-tone={sectionToneAttr(block)}
+        data-lp-section-tone="dark"
         data-lp-variant={composition}
         aria-label="Hero"
       >
-        <div className="absolute inset-0" data-lp-hero-overlay-bg="1" style={{ backgroundImage: bg }} aria-hidden />
-        <div className="relative z-[1] mx-auto max-w-6xl" data-lp-container-inner="1">
+        <div
+          className="absolute inset-0"
+          data-lp-hero-overlay-bg="1"
+          style={{
+            backgroundImage: bg,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }}
+          aria-hidden
+        />
+        <div
+          className="absolute inset-0"
+          aria-hidden
+          style={{
+            background:
+              'linear-gradient(105deg, rgba(8,10,16,0.82) 0%, rgba(8,10,16,0.45) 52%, rgba(8,10,16,0.22) 100%)',
+          }}
+        />
+        <div className="relative z-[1] mx-auto max-w-6xl" data-lp-container-inner="1" data-lp-hero-on-dark="1">
           {copyCol}
         </div>
       </section>
@@ -1238,11 +1365,272 @@ function HeroBlock({
     );
   }
 
-  // centered | minimal-copy | default fallback
+  if (composition === 'asymmetric') {
+    return (
+      <section
+        className={`${spacingClass(block.spacing)} relative overflow-hidden px-4 sm:px-6`}
+        style={sectionBgStyle(block, 'var(--lp-gradient)')}
+        data-lp-section-tone={sectionToneAttr(block)}
+        data-lp-bg-motion={sectionBgMotionAttr(block)}
+        data-lp-variant={composition}
+        aria-label="Hero"
+      >
+        <div
+          className="mx-auto grid max-w-6xl items-center gap-8 md:grid-cols-12 md:gap-8"
+          data-lp-hero-grid="1"
+          data-lp-container-inner="1"
+        >
+          <div className="md:col-span-5">{copyCol}</div>
+          <div className="md:col-span-7 md:-mr-4 lg:-mr-8" data-lp-hero-bleed="1">
+            {visual}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (composition === 'image-collage') {
+    const src = block.imageUrl;
+    return (
+      <section
+        className={`${spacingClass(block.spacing)} relative overflow-hidden px-4 sm:px-6`}
+        style={sectionBgStyle(block, 'var(--lp-gradient)')}
+        data-lp-section-tone={sectionToneAttr(block)}
+        data-lp-variant={composition}
+        aria-label="Hero"
+      >
+        <div
+          className="mx-auto grid max-w-6xl items-center gap-8 md:grid-cols-2 md:gap-10"
+          data-lp-hero-grid="1"
+          data-lp-container-inner="1"
+        >
+          {copyCol}
+          <div className="grid grid-cols-2 gap-3 md:gap-4" data-lp-hero-collage="1">
+            <div className="col-span-2 overflow-hidden" style={{ borderRadius: 'var(--lp-radius-lg, var(--lp-radius))' }}>
+              {visual}
+            </div>
+            {src ? (
+              <>
+                <div className="overflow-hidden aspect-[4/3]" style={{ borderRadius: 'var(--lp-radius)' }}>
+                  <LpContentImage
+                    src={src}
+                    alt=""
+                    fallbackLabel=""
+                    width={400}
+                    height={300}
+                    loading="lazy"
+                    decoding="async"
+                    className="h-full w-full object-cover object-[20%_40%] scale-110"
+                    style={{ borderRadius: 'var(--lp-radius)' }}
+                  />
+                </div>
+                <div className="overflow-hidden aspect-[4/3]" style={{ borderRadius: 'var(--lp-radius)' }}>
+                  <LpContentImage
+                    src={src}
+                    alt=""
+                    fallbackLabel=""
+                    width={400}
+                    height={300}
+                    loading="lazy"
+                    decoding="async"
+                    className="h-full w-full object-cover object-[80%_60%] scale-110"
+                    style={{ borderRadius: 'var(--lp-radius)' }}
+                  />
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (composition === 'product-screenshot') {
+    return (
+      <section
+        className={`${spacingClass(block.spacing)} relative overflow-hidden px-4 sm:px-6`}
+        style={sectionBgStyle(block, 'var(--lp-gradient)')}
+        data-lp-section-tone={sectionToneAttr(block)}
+        data-lp-variant={composition}
+        aria-label="Hero"
+      >
+        <div className="mx-auto flex max-w-6xl flex-col gap-8" data-lp-container-inner="1">
+          <div className="mx-auto max-w-3xl text-center">{copyCol}</div>
+          <div
+            className="relative mx-auto w-full max-w-5xl overflow-hidden border shadow-2xl"
+            data-lp-hero-screenshot="1"
+            style={{
+              borderRadius: 'var(--lp-radius-lg, 16px)',
+              borderColor: 'var(--lp-border)',
+              background: 'var(--lp-surface)',
+            }}
+          >
+            <div
+              className="flex items-center gap-1.5 border-b px-4 py-2.5"
+              style={{ borderColor: 'var(--lp-border)', background: 'var(--lp-surface-alt, var(--lp-canvas))' }}
+              aria-hidden
+            >
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#F87171' }} />
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#FBBF24' }} />
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#34D399' }} />
+            </div>
+            <div className="[&_[data-lp-hero-visual]_img]:aspect-[16/10] [&_[data-lp-hero-visual]_img]:rounded-none">
+              {visual}
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (composition === 'layered-cards') {
+    return (
+      <section
+        className={`${spacingClass(block.spacing)} relative overflow-hidden px-4 sm:px-6`}
+        style={sectionBgStyle(block, 'var(--lp-gradient)')}
+        data-lp-section-tone={sectionToneAttr(block)}
+        data-lp-variant={composition}
+        aria-label="Hero"
+      >
+        <div
+          className="mx-auto grid max-w-6xl items-center gap-8 md:grid-cols-2 md:gap-12"
+          data-lp-hero-grid="1"
+          data-lp-container-inner="1"
+        >
+          {copyCol}
+          <div className="relative mx-auto w-full max-w-lg" data-lp-hero-layers="1">
+            <div
+              className="absolute -left-3 top-6 h-[88%] w-[92%] rotate-[-4deg] border opacity-70 md:-left-6"
+              style={{
+                borderRadius: 'var(--lp-radius-lg, var(--lp-radius))',
+                background: 'var(--lp-surface-alt, var(--lp-canvas))',
+                borderColor: 'var(--lp-border)',
+                boxShadow: 'var(--lp-shadow-md)',
+              }}
+              aria-hidden
+            />
+            <div
+              className="absolute -right-2 top-3 h-[90%] w-[90%] rotate-[3deg] border opacity-80 md:-right-5"
+              style={{
+                borderRadius: 'var(--lp-radius-lg, var(--lp-radius))',
+                background: 'color-mix(in srgb, var(--lp-primary) 12%, var(--lp-surface))',
+                borderColor: 'var(--lp-border)',
+                boxShadow: 'var(--lp-shadow-sm)',
+              }}
+              aria-hidden
+            />
+            <div className="relative z-[1]">{visual}</div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (composition === 'dark-cinematic') {
+    const bg = block.imageUrl
+      ? `linear-gradient(105deg, rgba(8,10,16,0.92) 0%, rgba(8,10,16,0.55) 48%, rgba(8,10,16,0.25) 100%), url(${block.imageUrl})`
+      : `linear-gradient(135deg, #0B0E14 0%, color-mix(in srgb, ${primary} 35%, #0B0E14) 55%, #12161F 100%)`;
+    return (
+      <section
+        className={`${spacingClass(block.spacing)} relative min-h-[min(62vh,520px)] overflow-hidden px-4 sm:px-6 py-14 md:py-20`}
+        style={{
+          ...sectionBgStyle(block),
+          backgroundImage: bg,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        }}
+        data-lp-section-tone="dark"
+        data-lp-variant={composition}
+        aria-label="Hero"
+      >
+        <div className="relative z-[1] mx-auto max-w-3xl" data-lp-container-inner="1" data-lp-hero-on-dark="1">
+          {copyCol}
+        </div>
+      </section>
+    );
+  }
+
+  if (composition === 'gradient-mesh') {
+    return (
+      <section
+        className={`${spacingClass(block.spacing)} relative overflow-hidden px-4 sm:px-6`}
+        style={sectionBgStyle(block)}
+        data-lp-section-tone={sectionToneAttr(block)}
+        data-lp-variant={composition}
+        aria-label="Hero"
+      >
+        <div
+          className="pointer-events-none absolute inset-0"
+          aria-hidden
+          style={{
+            background: `
+              radial-gradient(ellipse 60% 50% at 15% 20%, color-mix(in srgb, ${primary} 42%, transparent) 0%, transparent 55%),
+              radial-gradient(ellipse 50% 45% at 88% 15%, color-mix(in srgb, var(--lp-accent, ${primary}) 28%, transparent) 0%, transparent 50%),
+              radial-gradient(ellipse 55% 40% at 70% 85%, color-mix(in srgb, var(--lp-secondary) 18%, transparent) 0%, transparent 55%),
+              var(--lp-gradient, var(--lp-canvas))
+            `,
+          }}
+        />
+        <div
+          className="relative z-[1] mx-auto grid max-w-6xl items-center gap-8 md:grid-cols-2 md:gap-10"
+          data-lp-hero-grid="1"
+          data-lp-container-inner="1"
+        >
+          {copyCol}
+          {visual}
+        </div>
+      </section>
+    );
+  }
+
+  if (composition === 'conversion-proof') {
+    const proofs = defaultTrust.slice(0, 3);
+    return (
+      <section
+        className={`${spacingClass(block.spacing)} relative overflow-hidden px-4 sm:px-6`}
+        style={sectionBgStyle(block, 'var(--lp-gradient)')}
+        data-lp-section-tone={sectionToneAttr(block)}
+        data-lp-variant={composition}
+        aria-label="Hero"
+      >
+        <div
+          className="mx-auto grid max-w-6xl items-center gap-8 md:grid-cols-12 md:gap-10"
+          data-lp-hero-grid="1"
+          data-lp-container-inner="1"
+        >
+          <div className="md:col-span-6">
+            {copyCol}
+            <div className="mt-6 flex flex-wrap gap-2" data-lp-hero-proof="1">
+              {proofs.map((p) => (
+                <span
+                  key={p}
+                  className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold"
+                  style={{
+                    borderColor: 'var(--lp-border)',
+                    background: 'var(--lp-surface)',
+                    color: 'var(--lp-secondary)',
+                    boxShadow: 'var(--lp-shadow-sm)',
+                  }}
+                >
+                  <span aria-hidden style={{ color: primary }}>
+                    ★
+                  </span>
+                  {p}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="md:col-span-6">{visual}</div>
+        </div>
+      </section>
+    );
+  }
+
+  // centered | minimal-copy | default fallback — keep visual large (no tiny inset)
   return (
     <section
-      className={`${spacingClass(block.spacing)} px-4 sm:px-6`}
-      style={sectionBgStyle(block)}
+      className={`${spacingClass(block.spacing)} relative overflow-hidden px-4 sm:px-6`}
+      style={sectionBgStyle(block, composition === 'centered' ? 'var(--lp-gradient)' : undefined)}
       data-lp-section-tone={sectionToneAttr(block)}
       data-lp-bg-motion={sectionBgMotionAttr(block)}
       data-lp-variant={composition}
@@ -1256,15 +1644,15 @@ function HeroBlock({
               src={block.imageUrl}
               alt={block.imageStyle?.alt || ''}
               fallbackLabel="Hero visual"
-              width={720}
-              height={480}
+              width={1100}
+              height={620}
               loading="lazy"
               decoding="async"
-              className="mx-auto mt-8 max-h-80 w-full max-w-xl object-cover shadow-lg"
+              className="mx-auto mt-8 w-full max-w-5xl object-cover shadow-lg"
               data-lp-img-motion={lpImgMotionAttr(block.imageStyle)}
               style={{
                 borderRadius: block.imageStyle?.borderRadius || 'var(--lp-image-radius, var(--lp-radius))',
-                aspectRatio: '3 / 2',
+                aspectRatio: '16 / 9',
                 ...lpImgStyle(block.imageStyle),
               }}
             />,
@@ -1314,7 +1702,7 @@ function ListCards({
         data-lp-title-block={(block.headline || '').trim() ? '1' : undefined}
         data-lp-paragraph-block={(block.subheadline || '').trim() && !(block.headline || '').trim() ? '1' : undefined}
       >
-        <div className="mx-auto max-w-6xl" data-lp-container-inner="1">
+        <div className="mx-auto max-w-6xl" data-lp-container-inner="1" data-lp-free-surface="1">
           <SectionHead
             headline={block.headline}
             subheadline={block.subheadline}
@@ -2318,11 +2706,16 @@ function BlockView({
       }
 
       const buttonOnly =
+        !boxStyle &&
         !(block.headline || '').trim() &&
         !(block.subheadline || '').trim() &&
-        !!(block.ctaLabel || '').trim();
+        !(block.body || '').trim();
 
       if (buttonOnly) {
+        // Published view: no label → no empty chrome (delete block to remove).
+        if (!canvas && !(block.ctaLabel || '').trim()) {
+          return null;
+        }
         const chrome = (block.style || {}) as CSSProperties;
         // Tight chrome: no section padding — SelectableShell outline must hug the button.
         const freeW = block.freeLayout?.width;
@@ -2363,6 +2756,7 @@ function BlockView({
                   minWidth: freeW ? undefined : 40,
                   minHeight: freeH ? undefined : 40,
                   textAlign: (chrome.textAlign as CSSProperties['textAlign']) || 'center',
+                  textTransform: chrome.textTransform as CSSProperties['textTransform'],
                   boxSizing: 'border-box',
                   whiteSpace: 'nowrap',
                 }}
@@ -3704,19 +4098,21 @@ export function LandingPageRenderer({
   const selectedElement = primaryTarget?.element ?? canvasHandlers?.selection?.element;
 
   useEffect(() => {
+    // Always warm the professional font set so designFamily swaps never flash system fonts.
+    const catalogFonts = [
+      '"Oswald"',
+      '"Inter"',
+      '"Playfair Display"',
+      '"DM Sans"',
+      '"Manrope"',
+      '"Plus Jakarta Sans"',
+      '"Cormorant Garamond"',
+      '"Fraunces"',
+      '"Space Grotesk"',
+      '"IBM Plex Sans"',
+    ];
     ensureLandingPageCatalogFonts(tokens.fontFamily);
-    for (const ff of ['"Oswald"', '"Inter"', '"Playfair Display"', '"DM Sans"', '"Manrope"']) {
-      if (
-        /Oswald|Inter|Playfair|minimal|bold|conversion|portfolio|corporate/i.test(
-          `${tokens.fontFamily || ''} ${designFamilyAttr || ''} ${goldStandard || ''}`,
-        )
-      ) {
-        ensureLandingPageCatalogFonts(ff);
-      }
-    }
-    if (/Fraunces|Playfair|serif/i.test(tokens.fontFamily || '')) {
-      ensureLandingPageCatalogFonts('"DM Sans"');
-    }
+    for (const ff of catalogFonts) ensureLandingPageCatalogFonts(ff);
     if (goldStandard === 'modern-saas') {
       ensureLandingPageCatalogFonts('"IBM Plex Sans"');
     }
@@ -3912,11 +4308,27 @@ export function LandingPageRenderer({
             e.preventDefault();
             e.stopPropagation();
             const payload = parseSidebarPresetPayload(raw);
-            if (payload) canvasHandlers.onInsertSidebarPreset(payload, { mode: 'end' });
+            if (payload) {
+              canvasHandlers.onInsertSidebarPreset(payload, {
+                mode: 'end',
+                clientX: e.clientX,
+                clientY: e.clientY,
+              });
+            }
           }}
         >
           {spec.blocks.map((block) => {
             if (!block.enabled) return null;
+            const rs = (block.responsiveStyle || {}) as {
+              desktop?: { display?: string };
+              tablet?: { display?: string };
+              mobile?: { display?: string };
+            };
+            const responsiveHide = {
+              desktop: rs.desktop?.display === 'none',
+              tablet: rs.tablet?.display === 'none',
+              mobile: rs.mobile?.display === 'none',
+            };
             if (block.type === 'Hero') {
               return (
                 <div key={block.id} data-lp-block-slot={block.id} data-lp-hero-slot-wrap="1">
@@ -3942,6 +4354,7 @@ export function LandingPageRenderer({
                     publicFreeLayout={
                       canvasHandlers ? null : resolvePublicSectionFreeLayout(block)
                     }
+                    responsiveHide={responsiveHide}
                   >
                     <HeroBlock
                       block={block as LandingPageTextBlock}
@@ -3981,6 +4394,7 @@ export function LandingPageRenderer({
                   publicFreeLayout={
                     canvasHandlers ? null : resolvePublicSectionFreeLayout(block)
                   }
+                  responsiveHide={responsiveHide}
                 >
                   <MemoBlockView
                     block={block}

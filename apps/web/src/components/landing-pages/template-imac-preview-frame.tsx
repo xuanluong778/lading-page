@@ -4,9 +4,9 @@ import type { ComponentProps } from 'react';
 import { TemplateHoverPreview } from '@/components/landing-pages/template-hover-preview';
 
 /** Public asset — transparent screen cutout; width/height match imac-frame.png. */
-export const IMAC_FRAME_SRC = '/landing-pages/imac-frame.png?v=2';
+export const IMAC_FRAME_SRC = '/landing-pages/imac-frame.png';
 const IMAC_FRAME_WIDTH = 644;
-const IMAC_FRAME_HEIGHT = 517;
+const IMAC_FRAME_HEIGHT = 512;
 
 /** Screen inset (% of frame) tuned for imac-frame.png — preview stays inside bezels, above chin. */
 const SCREEN_INSET = {
@@ -53,10 +53,7 @@ export function TemplateImacPreviewFrame(props: HoverPreviewProps) {
 
 export function TemplateImacPreviewSkeleton() {
   return (
-    <div
-      className="relative w-full"
-      style={{ aspectRatio: `${IMAC_FRAME_WIDTH} / ${IMAC_FRAME_HEIGHT}` }}
-    >
+    <div className="relative w-full" style={{ aspectRatio: '644 / 517' }}>
       <div
         className="absolute animate-pulse bg-white/10"
         style={{
@@ -71,7 +68,7 @@ export function TemplateImacPreviewSkeleton() {
         src={IMAC_FRAME_SRC}
         alt=""
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-10 h-full w-full select-none object-fill opacity-40"
+        className="pointer-events-none absolute inset-0 z-10 h-full w-full select-none object-contain opacity-40"
       />
     </div>
   );

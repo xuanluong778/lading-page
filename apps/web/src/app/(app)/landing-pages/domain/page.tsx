@@ -261,32 +261,58 @@ export default function LandingPagesDomainPage() {
       ) : null}
 
       {selected?.dnsInstructions?.length ? (
-        <section className="overflow-x-auto rounded-lg border border-white/10">
-          <table className="w-full min-w-[36rem] text-left text-sm">
-            <thead className="border-b border-white/10 text-xs uppercase opacity-60">
-              <tr>
-                <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2">Host</th>
-                <th className="px-3 py-2">Value</th>
-                <th className="px-3 py-2">Ghi chú</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selected.dnsInstructions.map((row, i) => (
-                <tr key={`${row.type}-${row.host}-${i}`} className="border-b border-white/5">
-                  <td className="px-3 py-2 font-medium">{row.type}</td>
-                  <td className="px-3 py-2">{row.host}</td>
-                  <td className="px-3 py-2">
-                    <button className="break-all text-left underline" onClick={() => void copy(row.value)}>
-                      {row.value}
-                    </button>
-                  </td>
-                  <td className="px-3 py-2 text-xs opacity-70">{row.hint}</td>
+        <>
+          <section className="space-y-2 sm:hidden">
+            {selected.dnsInstructions.map((row, i) => (
+              <article
+                key={`${row.type}-${row.host}-${i}`}
+                className="rounded-lg border border-white/10 px-3 py-2 text-sm"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{row.type}</span>
+                  <span className="text-xs opacity-60">Host: {row.host}</span>
+                </div>
+                <button
+                  type="button"
+                  className="mt-1 break-all text-left text-xs underline"
+                  onClick={() => void copy(row.value)}
+                >
+                  {row.value}
+                </button>
+                {row.hint ? <p className="mt-1 text-xs opacity-70">{row.hint}</p> : null}
+              </article>
+            ))}
+          </section>
+          <section className="hidden overflow-x-auto rounded-lg border border-white/10 sm:block">
+            <table className="w-full min-w-[36rem] text-left text-sm">
+              <thead className="border-b border-white/10 text-xs uppercase opacity-60">
+                <tr>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2">Host</th>
+                  <th className="px-3 py-2">Value</th>
+                  <th className="px-3 py-2">Ghi chú</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+              </thead>
+              <tbody>
+                {selected.dnsInstructions.map((row, i) => (
+                  <tr key={`${row.type}-${row.host}-${i}`} className="border-b border-white/5">
+                    <td className="px-3 py-2 font-medium">{row.type}</td>
+                    <td className="px-3 py-2">{row.host}</td>
+                    <td className="px-3 py-2">
+                      <button
+                        className="break-all text-left underline"
+                        onClick={() => void copy(row.value)}
+                      >
+                        {row.value}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2 text-xs opacity-70">{row.hint}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </>
       ) : null}
 
       <ul className="space-y-2">

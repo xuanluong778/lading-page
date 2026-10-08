@@ -1,11 +1,29 @@
 # MarketingAutoAZ — Landing Page feature (extracted backup)
 
-This repository is a **source snapshot** of the Landing Page feature extracted from the MarketingAutoAZ monorepo on the VPS (`marketingautoaz.com`). It is intended for backup, review, and migration — **not** as a standalone runnable app.
+This repository is a **source snapshot** of the Landing Page feature from the MarketingAutoAZ monorepo. It is intended for backup, review, and migration — **not** as a standalone runnable app.
 
-## Origin
+## Source of truth (this backup)
 
-- Monorepo root: `/var/www/marketingaut_usr/data/www/marketingautoaz.com`
-- Paths below mirror the monorepo layout so you can copy files back or diff against `main`.
+- **Release tree:** `/var/www/marketingaut_usr/data/releases/landing-page-graft-20260916/` (live production graft)
+- **Builder UI:** **NEW** layout — **no left sidebar**; Layers / Theme / Add / AI live on the **right Inspector rail** (+ Thành phần / Thiết kế tổng thể).
+
+### Do **not** use the old builder UI
+
+An earlier commit in this repo was extracted from `/var/www/marketingaut_usr/data/www/marketingautoaz.com`, which still renders `<LandingPageBuilderSidebar` (legacy left sidebar). **That tree is not the current builder.** Always sync from the graft release above.
+
+### How to verify you have the new UI
+
+In `apps/web/src/components/landing-pages/landing-page-builder.tsx`:
+
+1. There must **not** be a JSX render of `<LandingPageBuilderSidebar`.
+2. There **must** be a comment like: `Left sidebar removed — Layers / Theme / Add / AI live on right Inspector rail`.
+
+Quick check:
+
+```bash
+grep -n 'Left sidebar removed' apps/web/src/components/landing-pages/landing-page-builder.tsx
+! grep -n '<LandingPageBuilderSidebar' apps/web/src/components/landing-pages/landing-page-builder.tsx
+```
 
 ## What is included
 
@@ -24,7 +42,7 @@ This repository is a **source snapshot** of the Landing Page feature extracted f
 
 - Full monorepo: `package.json`, workspace config, other apps/packages
 - Environment secrets (`.env` — never commit)
-- `node_modules`, production uploads (large media under backup `uploads/` omitted)
+- `node_modules`, `.next`, production uploads (large media under backup `uploads/` omitted)
 - Unrelated Prisma models — only LP-related excerpt + additive migration
 
 ## Restore / develop

@@ -91,6 +91,8 @@ import {
   landingPageCnameTarget,
   landingPageDnsInstructions,
   normalizeLandingCustomDomain,
+  customDomainMayProvision,
+  requestCustomDomainSync,
   verifyLandingPageDns,
 } from './landing-page-domain-dns.util';
 
@@ -1035,9 +1037,13 @@ export class LandingPagesService implements OnModuleInit {
     });
 
     const result = await verifyLandingPageDns(row.customDomain);
+    const blocked =
+      result.ok && !customDomainMayProvision(row.customDomain)
+        ? 'Domain đã thuộc website khác trên edge hoặc chưa chứng minh ownership'
+        : null;
     const updated = await this.prisma.landingPage.update({
       where: { id: row.id },
-      data: result.ok
+      data: result.ok && !blocked
         ? {
             customDomainStatus: LandingPageDomainStatus.ACTIVE,
             customDomainError: null,
@@ -1045,10 +1051,11 @@ export class LandingPagesService implements OnModuleInit {
           }
         : {
             customDomainStatus: LandingPageDomainStatus.FAILED,
-            customDomainError: (result.error || 'DNS verify failed').slice(0, 500),
+            customDomainError: (blocked || result.error || 'DNS verify failed').slice(0, 500),
             customDomainVerifiedAt: null,
           },
     });
+    if (result.ok && !blocked) requestCustomDomainSync();
     return {
       page: this.serializePage(updated),
       dns: result,
@@ -1068,6 +1075,7 @@ export class LandingPagesService implements OnModuleInit {
         customDomainVerifiedAt: null,
       },
     });
+    requestCustomDomainSync();
     return this.serializePage(updated);
   }
 

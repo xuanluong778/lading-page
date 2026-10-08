@@ -12,16 +12,23 @@ import {
   getCategoryVisualPalette,
   VISUAL_DNA_BATCH1_CATEGORIES,
 } from './landing-page-category-visual-dna';
+import { sanitizeThemeTokensForContrast } from './landing-page-contrast';
 
-/** Mirrors web `designFamilyTokenOverrides` — keep in sync for catalog SoT. */
+/**
+ * Per designFamily typography + surface DNA.
+ * Heading stacks are unique across families (no single-font catalog).
+ * Mirrors web `designFamilyTokenOverrides` — keep in sync for catalog SoT.
+ */
 export function designFamilyTokenOverrides(
   familyRaw: unknown,
 ): Partial<LandingPageThemeTokens> {
   const family = resolveDesignFamily(familyRaw);
   const map: Record<LandingPageDesignFamily, Partial<LandingPageThemeTokens>> = {
     editorial: {
-      fontFamily: '"Playfair Display", "Fraunces", serif',
-      fontSizeHero: 'clamp(2.15rem, 5vw, 3.6rem)',
+      fontFamily: '"Playfair Display", "Fraunces", Georgia, serif',
+      fontSizeHero: 'clamp(2.2rem, 5.2vw, 3.65rem)',
+      fontSizeXl: '1.375rem',
+      fontSizeLg: '1.125rem',
       sectionSpacing: '3.5rem',
       textWidth: '38rem',
       imageAspect: '3 / 4',
@@ -29,14 +36,18 @@ export function designFamilyTokenOverrides(
       density: 'spacious',
       imageTreatment: 'editorial',
       fontWeightHeading: 700,
+      fontWeightBody: 400,
       lineHeightHeading: 1.12,
+      lineHeightBody: 1.65,
       shadowMd: '0 16px 40px rgba(15, 23, 42, 0.08)',
       surfaceAlt: '#F4F1EC',
       canvas: '#FAF8F5',
     },
     minimal: {
-      fontFamily: '"Oswald", "Inter", sans-serif',
-      fontSizeHero: 'clamp(1.9rem, 4vw, 3rem)',
+      // DM Sans — distinct from Oswald bold/conversion
+      fontFamily: '"DM Sans", "Inter", system-ui, sans-serif',
+      fontSizeHero: 'clamp(1.95rem, 4.2vw, 3.05rem)',
+      fontSizeXl: '1.25rem',
       sectionSpacing: '2.75rem',
       radius: '8px',
       shadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
@@ -45,12 +56,14 @@ export function designFamilyTokenOverrides(
       imageTreatment: 'product-flat',
       buttonStyle: 'outline',
       fontWeightHeading: 700,
+      fontWeightBody: 400,
+      lineHeightHeading: 1.15,
       surfaceAlt: '#F1F5F9',
       canvas: '#F8FAFC',
     },
     luxury: {
-      fontFamily: '"Cormorant Garamond", "Playfair Display", serif',
-      fontSizeHero: 'clamp(2.1rem, 4.5vw, 3.4rem)',
+      fontFamily: '"Cormorant Garamond", "Playfair Display", Georgia, serif',
+      fontSizeHero: 'clamp(2.2rem, 4.8vw, 3.5rem)',
       sectionSpacing: '3.75rem',
       radius: '14px',
       imageAspect: '4 / 5',
@@ -58,37 +71,45 @@ export function designFamilyTokenOverrides(
       density: 'spacious',
       imageTreatment: 'editorial',
       fontWeightHeading: 500,
+      fontWeightBody: 400,
+      lineHeightHeading: 1.1,
+      lineHeightBody: 1.7,
       shadowLg: '0 28px 70px rgba(15, 23, 42, 0.12)',
       surfaceAlt: '#F5F0E8',
       canvas: '#FAF7F2',
     },
     bold: {
       fontFamily: '"Oswald", "Inter", sans-serif',
-      fontSizeHero: 'clamp(2.25rem, 5.5vw, 3.75rem)',
+      fontSizeHero: 'clamp(2.35rem, 5.6vw, 3.85rem)',
       sectionSpacing: '2.75rem',
       radius: '16px',
       imageAspect: '16 / 9',
       density: 'comfortable',
       imageTreatment: 'photo-real',
-      fontWeightHeading: 800,
+      fontWeightHeading: 700,
+      fontWeightBody: 400,
+      lineHeightHeading: 1.05,
       buttonStyle: 'solid',
       surfaceAlt: '#FFF7ED',
       canvas: '#FFFBEB',
     },
     organic: {
-      fontFamily: '"Fraunces", "Manrope", serif',
-      fontSizeHero: 'clamp(2rem, 4.2vw, 3.15rem)',
+      fontFamily: '"Fraunces", "Manrope", Georgia, serif',
+      fontSizeHero: 'clamp(2.05rem, 4.4vw, 3.2rem)',
       sectionSpacing: '3.25rem',
       radius: '20px',
       imageAspect: '5 / 6',
       density: 'spacious',
       imageTreatment: 'photo-real',
       radiusPill: '9999px',
+      fontWeightHeading: 600,
+      fontWeightBody: 400,
+      lineHeightHeading: 1.14,
       surfaceAlt: '#F0FDF4',
       canvas: '#F7FEE7',
     },
     corporate: {
-      fontFamily: '"Inter", "IBM Plex Sans", sans-serif',
+      fontFamily: '"Inter", "IBM Plex Sans", system-ui, sans-serif',
       fontSizeHero: 'clamp(1.95rem, 4vw, 3rem)',
       sectionSpacing: '3rem',
       radius: '10px',
@@ -96,51 +117,65 @@ export function designFamilyTokenOverrides(
       density: 'comfortable',
       imageTreatment: 'product-flat',
       fontWeightHeading: 700,
+      fontWeightBody: 400,
+      lineHeightHeading: 1.15,
       buttonStyle: 'solid',
       surfaceAlt: '#EEF2FF',
       canvas: '#F8FAFC',
     },
     conversion: {
-      fontFamily: '"Oswald", "Inter", sans-serif',
-      fontSizeHero: 'clamp(2rem, 4.5vw, 3.35rem)',
+      // Plus Jakarta — conversion energy without cloning Oswald bold
+      fontFamily: '"Plus Jakarta Sans", "Inter", system-ui, sans-serif',
+      fontSizeHero: 'clamp(2.05rem, 4.6vw, 3.4rem)',
       sectionSpacing: '2.5rem',
       buttonStyle: 'solid',
       density: 'compact',
       imageTreatment: 'photo-real',
       fontWeightHeading: 800,
+      fontWeightBody: 400,
+      lineHeightHeading: 1.1,
       surfaceAlt: '#EFF6FF',
       canvas: '#F8FAFC',
     },
     portfolio: {
-      fontFamily: '"Playfair Display", "Fraunces", serif',
-      fontSizeHero: 'clamp(2.05rem, 4.5vw, 3.35rem)',
+      fontFamily: '"Playfair Display", "Fraunces", Georgia, serif',
+      fontSizeHero: 'clamp(2.1rem, 4.6vw, 3.4rem)',
       sectionSpacing: '3.25rem',
       imageAspect: '4 / 3',
       radius: '12px',
       density: 'spacious',
       imageTreatment: 'editorial',
+      fontWeightHeading: 700,
+      fontWeightBody: 400,
+      lineHeightHeading: 1.12,
       surfaceAlt: '#F1F5F9',
       canvas: '#FAFAF9',
     },
     local: {
-      fontFamily: '"Plus Jakarta Sans", "Manrope", sans-serif',
+      fontFamily: '"Manrope", "Plus Jakarta Sans", system-ui, sans-serif',
       fontSizeHero: 'clamp(1.95rem, 4.2vw, 3.05rem)',
       sectionSpacing: '2.85rem',
       radius: '12px',
       density: 'comfortable',
       imageTreatment: 'photo-real',
       buttonStyle: 'solid',
+      fontWeightHeading: 700,
+      fontWeightBody: 400,
+      lineHeightHeading: 1.15,
       surfaceAlt: '#ECFEFF',
       canvas: '#F0FDFA',
     },
     product: {
-      fontFamily: '"Space Grotesk", "Inter", sans-serif',
-      fontSizeHero: 'clamp(2rem, 4.3vw, 3.2rem)',
+      fontFamily: '"Space Grotesk", "DM Sans", system-ui, sans-serif',
+      fontSizeHero: 'clamp(2.05rem, 4.4vw, 3.25rem)',
       sectionSpacing: '2.85rem',
       imageAspect: '1 / 1',
       radius: '14px',
       density: 'comfortable',
       imageTreatment: 'product-flat',
+      fontWeightHeading: 700,
+      fontWeightBody: 400,
+      lineHeightHeading: 1.12,
       surfaceAlt: '#F8FAFC',
       canvas: '#FFFFFF',
     },
@@ -626,25 +661,32 @@ function categoryCanvasOverrides(
         density: 'spacious',
       },
       {
-        primary: '#A78BFA',
-        secondary: '#E9D5FF',
-        background: '#0B0F1A',
-        canvas: '#0B0F1A',
-        surface: '#121A2E',
-        surfaceAlt: '#1E1B4B',
+        primary: '#EC4899',
+        secondary: '#A855F7',
+        accent: '#22D3EE',
+        background: '#0B0E14',
+        canvas: '#0B0E14',
+        surface: '#12161F',
+        surfaceAlt: '#1A2234',
         text: '#F8FAFC',
-        muted: '#A5B4FC',
-        border: '#312E81',
-        gradient: 'linear-gradient(145deg, #1E1B4B 0%, #312E81 35%, #0B0F1A 100%)',
-        fontFamily: '"Space Grotesk", "Segoe UI", sans-serif',
+        muted: '#94A3B8',
+        border: '#2A3348',
+        button: '#EC4899',
+        gradient:
+          'radial-gradient(ellipse 85% 55% at 88% 8%, #A855F755 0%, transparent 55%), radial-gradient(ellipse 70% 50% at 8% 92%, #22D3EE40 0%, transparent 50%), linear-gradient(155deg, #0B0E14 0%, #1A2234 48%, #12161F 100%)',
+        fontFamily: '"Plus Jakarta Sans", "Segoe UI", sans-serif',
         fontSizeHero: 'clamp(2.25rem, 5vw, 3.65rem)',
-        fontWeightHeading: 700,
+        fontWeightHeading: 800,
         lineHeightHeading: 1.08,
         containerWidth: '68rem',
         sectionSpacing: '2.85rem',
-        shadowLg: '0 24px 64px rgba(0, 0, 0, 0.5)',
+        shadowLg: '0 28px 72px rgba(236, 72, 153, 0.22)',
+        shadowMd: '0 14px 40px rgba(168, 85, 247, 0.18)',
         density: 'spacious',
         imageTreatment: 'editorial',
+        radius: '16px',
+        iconSurface: '#2A1A3A',
+        iconColor: '#EC4899',
       },
       {
         primary: '#1D4ED8',
@@ -664,10 +706,13 @@ function categoryCanvasOverrides(
         containerWidth: '68rem',
         sectionSpacing: '2.7rem',
         density: 'comfortable',
+        iconSurface: '#DBEAFE',
+        iconColor: '#1D4ED8',
       },
       {
         primary: '#818CF8',
         secondary: '#C7D2FE',
+        accent: '#22D3EE',
         background: '#0F172A',
         canvas: '#0B1220',
         surface: '#1E293B',
@@ -675,13 +720,16 @@ function categoryCanvasOverrides(
         text: '#F8FAFC',
         muted: '#94A3B8',
         border: '#475569',
-        gradient: 'linear-gradient(145deg, #0B1220 0%, #1E293B 55%, #0F172A 100%)',
+        gradient:
+          'radial-gradient(ellipse 80% 50% at 85% 10%, #818CF840 0%, transparent 55%), linear-gradient(145deg, #0B1220 0%, #1E293B 55%, #0F172A 100%)',
         fontFamily: '"Inter", "Segoe UI", sans-serif',
         fontSizeHero: 'clamp(2rem, 4.2vw, 3rem)',
         fontWeightHeading: 700,
         containerWidth: '72rem',
         sectionSpacing: '2.75rem',
         density: 'comfortable',
+        iconSurface: '#312E81',
+        iconColor: '#A5B4FC',
       },
       {
         primary: '#9333EA',
@@ -700,6 +748,8 @@ function categoryCanvasOverrides(
         sectionSpacing: '2.6rem',
         density: 'compact',
         shadowMd: '0 14px 36px rgba(147, 51, 234, 0.14)',
+        iconSurface: '#F3E8FF',
+        iconColor: '#9333EA',
       },
       {
         primary: '#18181B',
@@ -720,6 +770,8 @@ function categoryCanvasOverrides(
         lineHeightHeading: 1.15,
         containerWidth: '42rem',
         sectionSpacing: '2.25rem',
+        iconSurface: '#F4F4F5',
+        iconColor: '#18181B',
       },
     ];
     return saasPalettes[i] || {};
@@ -753,6 +805,20 @@ export function applyCatalogThemeTokens(input: ApplyCatalogThemeTokensInput): La
   if (!merged.gradient) {
     merged.gradient = `linear-gradient(160deg, ${merged.surfaceAlt || merged.surface} 0%, ${merged.background} 55%, ${merged.surface} 100%)`;
   }
+  if (!merged.border) {
+    merged.border = merged.surface === merged.background ? '#E2E8F0' : undefined;
+  }
+  if (!merged.iconSurface) {
+    merged.iconSurface = `color-mix(in srgb, ${merged.primary} 14%, ${merged.surface})`;
+  }
+  if (!merged.iconColor) merged.iconColor = merged.primary;
+  // Always align icon glyph to brand primary unless category DNA set a custom pair.
+  if (!category.iconColor) merged.iconColor = merged.primary;
+  if (!category.iconSurface) {
+    merged.iconSurface = `color-mix(in srgb, ${merged.primary} 14%, ${merged.surface})`;
+  }
+  if (!merged.accent) merged.accent = merged.secondary;
+  if (!merged.button) merged.button = merged.primary;
   if (input.category === 'agency') {
     merged.containerWidth = merged.containerWidth || '68rem';
     merged.sectionSpacing = merged.sectionSpacing || '2.35rem';
@@ -764,5 +830,6 @@ export function applyCatalogThemeTokens(input: ApplyCatalogThemeTokensInput): La
     merged.radiusMd = merged.radiusMd || merged.radius;
     merged.radiusLg = merged.radiusLg || `calc(${merged.radius} + 4px)`;
   }
-  return merged;
+  // WCAG AA: text / muted / icon must read on canvas + surface.
+  return sanitizeThemeTokensForContrast(merged);
 }

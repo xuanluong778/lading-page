@@ -1,6 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import {
   LANDING_PAGE_THEME_PRESETS,
@@ -13,9 +21,12 @@ import {
   resolveFreeLayoutForViewport,
   ensureSectionFreeLayoutHeight,
   reflowFreeSectionsAfterChange,
+  expandBlocksToFitElementLayouts,
+  packFreeSectionsVertical,
+  isFloatingTextLayerBlock,
+  SECTION_CONTENT_FIT_PADDING,
   sanitizeLandingPageDraftSpec,
   sanitizeLandingPagePersistSpec,
-  suggestLandingPageQuickTheme,
   duplicateLandingPageNestedItem,
   type LandingPageBlock,
   type LandingPageBlockType,
@@ -31,6 +42,11 @@ import {
 } from '@marketingspa/shared';
 import { LandingPageRenderer } from './landing-page-renderer';
 import { LandingPageDeviceFrame } from './landing-page-device-frame';
+import {
+  LandingPageCanvasZoomLayer,
+  handleCanvasZoomWheel,
+  syncCanvasZoomToInspectorDock,
+} from './landing-page-canvas-zoom';
 import { LandingPageInlineAiField } from './landing-page-inline-ai-field';
 import { LeadFormCrmInspector } from './lead-form-crm-inspector';
 import {
@@ -39,7 +55,33 @@ import {
   LandingPageInspectorDesignTab,
 } from './landing-page-inspector-design-tab';
 import { resolveInspectorContext } from './landing-page-inspector-context';
+import { LandingPageInspectorElementActions } from './landing-page-inspector-element-actions';
+import { LandingPageInspectorTextContent } from './landing-page-inspector-text-content';
 import { InspectorAccordion, InspectorEmptyHint } from './landing-page-inspector-ui';
+import {
+  LandingPageInspectorRail,
+  inspectorDockReservePx,
+  INSPECTOR_PANEL_WIDTH,
+  INSPECTOR_ADD_COMPONENTS_PANEL_WIDTH,
+  type InspectorRailId,
+} from './landing-page-inspector-rail';
+import { LandingPageInspectorGlobalDesign } from './landing-page-inspector-global-design';
+import { LandingPageAddComponentsPanel } from './landing-page-add-components-panel';
+import { LandingPageButtonInspector } from './landing-page-button-inspector';
+import { LandingPageIconInspector } from './landing-page-icon-inspector';
+import { LandingPageLeadFormFieldsInspector } from './landing-page-lead-form-fields-inspector';
+import { LandingPageInspectorResponsiveVisibility } from './landing-page-inspector-responsive';
+import { LandingPageElementVerticalToolbar } from './landing-page-element-vertical-toolbar';
+import { LandingPageSectionLibraryModal } from './landing-page-section-library-modal';
+import { LandingPageButtonLibraryModal } from './landing-page-button-library-modal';
+import {
+  getSectionLibraryTemplate,
+  materializeSectionLibraryTemplate,
+} from './landing-page-section-library-catalog';
+import {
+  buttonLibraryTemplateToPreset,
+  getButtonLibraryTemplate,
+} from './landing-page-button-library-catalog';
 import {
   LandingPageCanvasContextMenu,
   LpCanvasAiQuickPopover,
@@ -48,7 +90,6 @@ import {
   type LpCanvasClipboardStyle,
 } from './landing-page-canvas-context-menu';
 import { LandingPageImageField } from './landing-page-image-field';
-import { LandingPageBuilderSidebar } from './landing-page-builder-sidebar';
 import { LandingPageAiMenu } from './landing-page-ai-menu';
 import { LandingPageBuilderToolbar } from './landing-page-builder-toolbar';
 import { useRouter } from 'next/navigation';
@@ -88,7 +129,6 @@ import type {
 } from './landing-page-sidebar-dnd';
 import {
   elementKeyForField,
-  LandingPageCanvasTextToolbarHost,
   parseElementKey,
   type LandingPageCanvasElementKey,
   type LandingPageCanvasHandlers,
@@ -99,28 +139,31 @@ import {
   applyMarqueeSelection,
   applySelectionClick,
   isSectionLevelElement,
+  isTextToolbarTarget,
   lpSelectionKey,
   lpSelectionKeyMatches,
   normalizeLpSelectionTarget,
   parseLpSelectionKey,
   type LpSelectOptions,
   type LpSelectionTarget,
-  isTextToolbarTarget,
 } from './landing-page-canvas-selection';
 import {
   clampAbsoluteFreeLayout,
+  measureSectionContentHeightCss,
+  measureVisibleContentRect,
   patchAbsoluteFreeLayoutField,
   readCanvasPointerScale,
   readRect,
-  resolveFreeSurface,
+  clientPointToCanvasLocal,
 } from './landing-page-free-drag';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
-type InspectorTab = 'content' | 'design' | 'advanced';
+type InspectorTab = 'content' | 'design' | 'advanced' | 'add';
 
+/** Text / heading / image selection → open Inspector on Design first. */
 function preferInspectorDesignTab(target: LpSelectionTarget): boolean {
   if (isTextToolbarTarget(target)) return true;
   const el = target.element;
@@ -179,6 +222,103 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
 
 function cloneSpec(spec: LandingPageSpec): LandingPageSpec {
   return JSON.parse(JSON.stringify(spec)) as LandingPageSpec;
+}
+
+/** Title / paragraph-only Benefits used as free text layers on the canvas. */
+function isLpTextLayerBlock(block: LandingPageBlock): boolean {
+  return isFloatingTextLayerBlock(block);
+}
+
+/**
+ * Place a text-layer section at the drop pointer (canvas-local absolute free).
+ * Cascade when no pointer so sequential inserts never share the same x/y.
+ * Coordinates are canvas-root local (same space as freeLayoutStyle left/top).
+ */
+function resolveTextLayerFreeLayout(
+  blocks: LandingPageBlock[],
+  pos?: LpSidebarInsertPos,
+): LandingPageFreeLayout {
+  const freeText = blocks.filter(
+    (b) => isLpTextLayerBlock(b) && b.positionMode === 'free' && b.freeLayout,
+  );
+  if (
+    pos &&
+    typeof (pos as { clientX?: number }).clientX === 'number' &&
+    typeof (pos as { clientY?: number }).clientY === 'number' &&
+    Number.isFinite((pos as { clientX: number }).clientX) &&
+    Number.isFinite((pos as { clientY: number }).clientY)
+  ) {
+    const local = clientPointToCanvasLocal(
+      (pos as { clientX: number }).clientX,
+      (pos as { clientY: number }).clientY,
+    );
+    return {
+      x: Math.max(0, local.x - 8),
+      y: Math.max(0, local.y - 16),
+      width: 420,
+      height: 72,
+    };
+  }
+  // Click-insert cascade — unique canvas-local defaults (never shared x/y).
+  const existing = freeText.length;
+  return {
+    x: 48 + (existing % 6) * 36,
+    y: 96 + existing * 80,
+    width: 420,
+    height: 72,
+  };
+}
+
+/**
+ * Fold stale text-layer elementFreeLayouts into section.freeLayout and clear
+ * the element keys so save/reload never re-applies a second translate.
+ */
+function healTextLayerCoordinates(spec: LandingPageSpec): LandingPageSpec {
+  const prevEfl =
+    (spec.meta && typeof spec.meta === 'object'
+      ? (spec.meta as { elementFreeLayouts?: Record<string, LandingPageFreeLayout> }).elementFreeLayouts
+      : null) || {};
+  const nextEfl: Record<string, LandingPageFreeLayout> = { ...prevEfl };
+  let changed = false;
+  const blocks = spec.blocks.map((b) => {
+    if (!isLpTextLayerBlock(b)) return b;
+    const hKey = `${b.id}::headline`;
+    const sKey = `${b.id}::subheadline`;
+    const el = nextEfl[hKey] || nextEfl[sKey];
+    if (el) {
+      delete nextEfl[hKey];
+      delete nextEfl[sKey];
+      changed = true;
+      const base = b.freeLayout || { x: 0, y: 0 };
+      const freeLayout = clampAbsoluteFreeLayout({
+        x: Math.round((base.x || 0) + (el.x || 0)),
+        y: Math.max(0, Math.round((base.y || 0) + (el.y || 0))),
+        width: el.width || base.width || 420,
+        height: base.height || 72,
+        ...(base.rotate != null ? { rotate: base.rotate } : {}),
+        ...(el.rotate != null ? { rotate: el.rotate } : {}),
+      });
+      return {
+        ...b,
+        positionMode: 'free' as const,
+        freeLayout,
+        spacing: 'none' as const,
+      };
+    }
+    if (b.positionMode === 'free' && b.freeLayout) return b;
+    // Promote flow text layers that only had natural stacking — keep flow unless
+    // they already look free. No-op for clean flow titles.
+    return b;
+  });
+  if (!changed) return spec;
+  return {
+    ...spec,
+    blocks,
+    meta: {
+      ...(spec.meta || {}),
+      elementFreeLayouts: Object.keys(nextEfl).length ? nextEfl : undefined,
+    },
+  };
 }
 
 /** Stored autosave concurrency stamp — must seed on load or client sends 0 and hangs on STALE. */
@@ -315,18 +455,19 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     const parsed = parseLpSelectionKey(primarySelectedId);
     return parsed ? normalizeLpSelectionTarget(parsed) : null;
   }, [primarySelectedId]);
-  const inspectorAutoTabKeyRef = useRef<string | null>(null);
+  const textInspectorAutoKeyRef = useRef<string | null>(null);
+  const openInspectorOnSelectRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!primarySelectedId) {
-      inspectorAutoTabKeyRef.current = null;
+      textInspectorAutoKeyRef.current = null;
       return;
     }
     const parsed = parseLpSelectionKey(primarySelectedId);
     if (!parsed) return;
     const target = normalizeLpSelectionTarget(parsed);
     if (!preferInspectorDesignTab(target)) return;
-    if (inspectorAutoTabKeyRef.current === primarySelectedId) return;
-    inspectorAutoTabKeyRef.current = primarySelectedId;
+    if (textInspectorAutoKeyRef.current === primarySelectedId) return;
+    textInspectorAutoKeyRef.current = primarySelectedId;
     setInspectorTab('design');
   }, [primarySelectedId]);
   const selectedId = primaryTarget?.blockId ?? null;
@@ -342,6 +483,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       field: next.field,
     });
     setCanvasSelection((prev) => applySelectionClick(prev.ids, prev.primaryId, target, opts));
+    openInspectorOnSelectRef.current?.();
   }
 
   function setSelectedBlockId(id: string | null) {
@@ -385,6 +527,12 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
   const [fullscreenPreview, setFullscreenPreview] = useState(false);
   const router = useRouter();
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('content');
+  /** GetResponse-style rail: panel open/close is independent of canvas selection. */
+  const [inspectorPanelOpen, setInspectorPanelOpen] = useState(false);
+  const [inspectorRailSurface, setInspectorRailSurface] = useState<
+    'element' | 'page-theme' | 'add-components'
+  >('element');
+  const inspectorSuppressOpenRef = useRef(true);
   /** Desktop inspector layout: docked (right column) | floating (detach + drag). */
   const [inspectorMode, setInspectorMode] = useState<'docked' | 'floating'>('docked');
   const [floatingPosition, setFloatingPosition] = useState<{ x: number; y: number }>({
@@ -392,6 +540,26 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     y: 0,
   });
   const [inspectorDesktop, setInspectorDesktop] = useState(false);
+  const useInspectorRail = inspectorDesktop && inspectorMode === 'docked';
+  useEffect(() => {
+    if (!useInspectorRail) return;
+    if (inspectorSuppressOpenRef.current) {
+      inspectorSuppressOpenRef.current = false;
+      return;
+    }
+    if (!primarySelectedId) {
+      setInspectorPanelOpen(false);
+      return;
+    }
+    setInspectorPanelOpen(true);
+    setInspectorRailSurface('element');
+  }, [primarySelectedId, useInspectorRail]);
+  useEffect(() => {
+    if (!useInspectorRail) return;
+    // After dock width CSS var commits, refit preview via transform only (no spec).
+    const id = requestAnimationFrame(() => syncCanvasZoomToInspectorDock());
+    return () => cancelAnimationFrame(id);
+  }, [inspectorPanelOpen, useInspectorRail, inspectorRailSurface]);
   const [dockedInspectorHost, setDockedInspectorHost] = useState<HTMLDivElement | null>(null);
   /** Desktop: collapse left tool rail so canvas takes full width. */
   const inspectorDragRef = useRef<{
@@ -404,10 +572,44 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
   const detachInspectorDragRef = useRef<(() => void) | null>(null);
   const [sidebarOpenRequest, setSidebarOpenRequest] = useState<{
     panel: 'add';
-    tab: 'elements' | 'presets';
+    tab: 'elements' | 'presets' | 'layers';
     nonce: number;
   } | null>(null);
+  const [addPanelNonce, setAddPanelNonce] = useState(0);
+  const [addPanelInitial, setAddPanelInitial] = useState<{
+    rootMode?: 'add' | 'layers';
+    addTab?: 'elements' | 'presets';
+  }>({});
   const [mediaOpen, setMediaOpen] = useState(false);
+  const [sectionLibraryOpen, setSectionLibraryOpen] = useState(false);
+
+  const openRightAddComponents = useCallback(
+    (opts?: { rootMode?: 'add' | 'layers'; addTab?: 'elements' | 'presets' }) => {
+      setAddPanelInitial({
+        rootMode: opts?.rootMode || 'add',
+        addTab: opts?.addTab || 'elements',
+      });
+      setAddPanelNonce((n) => n + 1);
+      if (inspectorDesktop && inspectorMode === 'docked') {
+        setInspectorRailSurface('add-components');
+        setInspectorPanelOpen(true);
+      } else {
+        setInspectorTab('add');
+      }
+    },
+    [inspectorDesktop, inspectorMode],
+  );
+
+  useEffect(() => {
+    if (!sidebarOpenRequest) return;
+    openRightAddComponents({
+      rootMode: sidebarOpenRequest.tab === 'layers' ? 'layers' : 'add',
+      addTab: sidebarOpenRequest.tab === 'presets' ? 'presets' : 'elements',
+    });
+  }, [sidebarOpenRequest, openRightAddComponents]);
+  const sectionLibraryPosRef = useRef<LpSidebarInsertPos | null>(null);
+  const [buttonLibraryOpen, setButtonLibraryOpen] = useState(false);
+  const buttonLibraryPosRef = useRef<LpSidebarInsertPos | null>(null);
   /** In-memory clipboards for canvas context menu (reuse dup/update — no new persist model). */
   const blockClipboardRef = useRef<LandingPageBlock | null>(null);
   const styleClipboardRef = useRef<LpCanvasClipboardStyle | null>(null);
@@ -440,6 +642,62 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     [spec.blocks, selectedId],
   );
 
+  const inspectorActiveRail: InspectorRailId =
+    inspectorRailSurface === 'page-theme'
+      ? 'page-theme'
+      : inspectorRailSurface === 'add-components'
+        ? 'add-components'
+        : inspectorTab;
+
+  const inspectorPanelWidthPx =
+    useInspectorRail &&
+    inspectorPanelOpen &&
+    inspectorRailSurface === 'add-components'
+      ? INSPECTOR_ADD_COMPONENTS_PANEL_WIDTH
+      : INSPECTOR_PANEL_WIDTH;
+
+  const inspectorPanelTitle = useMemo(() => {
+    if (inspectorRailSurface === 'page-theme') return 'Thiết kế tổng thể';
+    if (inspectorRailSurface === 'add-components') return 'THÊM THÀNH PHẦN';
+    const ctx = resolveInspectorContext(selected, selectedElement, primaryTarget?.field);
+    if (ctx.kind === 'button') return 'NÚT';
+    return ctx.label;
+  }, [inspectorRailSurface, selected, selectedElement, primaryTarget?.field]);
+
+  const isButtonInspector =
+    resolveInspectorContext(selected, selectedElement, primaryTarget?.field).kind === 'button';
+  const isIconInspector =
+    resolveInspectorContext(selected, selectedElement, primaryTarget?.field).kind === 'icon';
+
+  const handleInspectorRailSelect = useCallback(
+    (id: InspectorRailId) => {
+      if (id === 'add-components') {
+        if (inspectorRailSurface === 'add-components' && inspectorPanelOpen) {
+          setInspectorPanelOpen(false);
+          return;
+        }
+        setInspectorRailSurface('add-components');
+        setInspectorPanelOpen(true);
+        return;
+      }
+      setInspectorPanelOpen(true);
+      if (id === 'page-theme') {
+        setInspectorRailSurface('page-theme');
+        return;
+      }
+      setInspectorRailSurface('element');
+      setInspectorTab(id);
+    },
+    [inspectorPanelOpen, inspectorRailSurface],
+  );
+
+  openInspectorOnSelectRef.current = () => {
+    if (!useInspectorRail) return;
+    if (inspectorSuppressOpenRef.current) return;
+    setInspectorPanelOpen(true);
+    setInspectorRailSurface('element');
+  };
+
   const pushHistory = useCallback((next: LandingPageSpec) => {
     // Always snapshot latest live draft from ref — never stale React closure.
     historyRef.current.push(cloneSpec(specRef.current));
@@ -455,8 +713,10 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     const data = await apiClient<PagePayload>(`/landing-pages/${pageId}`);
     setPage(data);
     // Loaded from DB — persist-normalized (no edge whitespace junk).
-    const loaded = sanitizeLandingPagePersistSpec(data.draftSpec);
+    const loaded = healTextLayerCoordinates(sanitizeLandingPagePersistSpec(data.draftSpec));
     setSpec(loaded);
+    inspectorSuppressOpenRef.current = true;
+    setInspectorPanelOpen(false);
     const firstBlockId = data.draftSpec?.blocks?.[0]?.id;
     if (firstBlockId) selectCanvas({ blockId: firstBlockId, element: 'section' });
     else setCanvasSelection({ ids: [], primaryId: null });
@@ -467,6 +727,17 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     autosaveQueuedRef.current = false;
     saveConflictRef.current = false;
     setSaveConflict(false);
+    // After first paint: hug free-section chrome to painted content (fixes legacy
+    // frames that floated over / cut through neighbouring sections).
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        try {
+          healFreeSectionFramesToContent();
+        } catch {
+          /* ignore heal errors */
+        }
+      });
+    });
   }, [pageId]);
 
   useEffect(() => {
@@ -717,6 +988,10 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
   // Sync right inspector to selected block id (stable — survives viewport change).
   useEffect(() => {
     if (!selectedBlockId || !inspectorPanelRef.current) return;
+    // Button / Icon inspectors own their fields — never steal focus.
+    if (isButtonInspector || isIconInspector) return;
+    if (document.activeElement?.closest?.('[data-lp-button-inspector="1"]')) return;
+    if (document.activeElement?.closest?.('[data-lp-icon-inspector="1"]')) return;
     const safeId = selectedBlockId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const root = inspectorPanelRef.current.querySelector(`[data-inspector-block-id="${safeId}"]`);
     if (!(root instanceof HTMLElement)) return;
@@ -740,7 +1015,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       }
     }
     root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [selectedBlockId, selectedElement]);
+  }, [selectedBlockId, selectedElement, isButtonInspector, isIconInspector]);
 
   const persist = useCallback(
     async (
@@ -945,16 +1220,31 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
         return;
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        // Collect unique selected block ids (section or nested element → parent block).
-        const blockIds = new Set<string>();
-        for (const key of canvasSelectionRef.current.ids) {
+        // Nested element (icon/text/box) → hide that element only.
+        // Section selection → delete the section block.
+        // Prefer live selection ref — never escalate nested → parent block delete.
+        const keys = canvasSelectionRef.current.ids.length
+          ? canvasSelectionRef.current.ids
+          : selectedIdRef.current
+            ? [`${selectedIdRef.current}::section`]
+            : [];
+        if (!keys.length) return;
+        const sectionIds: string[] = [];
+        const nested: LpSelectionTarget[] = [];
+        for (const key of keys) {
           const parsed = parseLpSelectionKey(key);
-          if (parsed?.blockId) blockIds.add(parsed.blockId);
+          if (!parsed) continue;
+          const norm = normalizeLpSelectionTarget(parsed);
+          if (isSectionLevelElement(norm.element)) sectionIds.push(norm.blockId);
+          else nested.push(norm);
         }
-        if (selectedIdRef.current) blockIds.add(selectedIdRef.current);
-        if (blockIds.size === 0) return;
         e.preventDefault();
-        removeBlocks([...blockIds]);
+        if (nested.length) {
+          canvasActionRef.current.hideCanvasElements(nested);
+          canvasActionRef.current.deselectCanvas();
+          return;
+        }
+        if (sectionIds.length) canvasActionRef.current.removeBlocks(sectionIds);
         return;
       }
       const meta = e.metaKey || e.ctrlKey;
@@ -1001,6 +1291,55 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     };
     pushHistory(markLandingPageUserEdits(next, keys.map((f) => `${id}.${f}`)));
   }
+
+  /** Inspector free-layout edits must target the active viewport (tablet/mobile overrides). */
+  function patchBlockFreeLayoutForViewport(blockId: string, nextLayout: LandingPageFreeLayout) {
+    if (!guardSectionUnlocked(blockId)) return;
+    const current = specRef.current;
+    const block = current.blocks.find((b) => b.id === blockId);
+    if (!block) return;
+    const clamped = ensureSectionFreeLayoutHeight(clampAbsoluteFreeLayout(nextLayout));
+    const style = { ...((block.style || {}) as Record<string, unknown>) };
+    const stripStyleMirror =
+      style.lpRotate != null ||
+      style.lpTranslateX != null ||
+      style.lpTranslateY != null ||
+      typeof style.transform === 'string';
+    let patch: Partial<LandingPageBlock> =
+      viewport === 'desktop'
+        ? { positionMode: 'free', freeLayout: clamped }
+        : {
+            positionMode: 'free',
+            freeLayout: block.freeLayout || clamped,
+            responsiveFreeLayout: {
+              ...(block.responsiveFreeLayout || {}),
+              [viewport]: clamped,
+            },
+          };
+    if (stripStyleMirror) {
+      patch = {
+        ...patch,
+        style: {
+          ...style,
+          lpRotate: undefined,
+          lpTranslateX: undefined,
+          lpTranslateY: undefined,
+          transform: undefined,
+        },
+      } as Partial<LandingPageBlock>;
+    }
+    updateBlock(blockId, patch);
+  }
+
+  const resolvedSelectedFreeLayout = useMemo(() => {
+    if (!selected || selected.positionMode !== 'free') return null;
+    return resolveFreeLayoutForViewport(
+      selected.positionMode,
+      selected.freeLayout,
+      selected.responsiveFreeLayout,
+      viewport,
+    );
+  }, [selected, viewport]);
 
   function applyAiToBlockField(id: string, field: string, value: string) {
     if (!guardSectionUnlocked(id)) return;
@@ -1080,19 +1419,22 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     return blocks.length;
   }
 
-  /** Insert a title-only Benefits block with preset typography (reuses text/drag/history). */
+  /** Insert a title text layer — free section at drop pointer (canvas-local). */
   function insertTitlePreset(preset: LandingPageTitlePreset, pos?: LpSidebarInsertPos) {
     ensureLandingPageTitleFonts();
     const current = specRef.current;
     const blocks = [...current.blocks];
     const insertAt = resolveInsertIndex(blocks, pos);
+    const freeLayout = resolveTextLayerFreeLayout(blocks, pos);
     const block = {
       ...defaultBlock('Benefits'),
       type: 'Benefits' as const,
       headline: preset.label,
       subheadline: '',
       items: [] as Array<{ id: string; title: string; description: string }>,
-      spacing: 'sm' as const,
+      spacing: 'none' as const,
+      positionMode: 'free' as const,
+      freeLayout,
     };
     blocks.splice(insertAt, 0, block);
     const styleKey = `${block.id}::headline`;
@@ -1100,6 +1442,13 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       (current.meta && typeof current.meta === 'object'
         ? (current.meta as { inlineTextStyles?: Record<string, LandingPageInlineTextStyle> }).inlineTextStyles
         : null) || {};
+    // Strip any stale element free-layout for this key — section freeLayout owns position.
+    const prevEfl =
+      (current.meta && typeof current.meta === 'object'
+        ? (current.meta as { elementFreeLayouts?: Record<string, LandingPageFreeLayout> }).elementFreeLayouts
+        : null) || {};
+    const nextEfl = { ...prevEfl };
+    delete nextEfl[styleKey];
     pushHistory(
       markLandingPageUserEdits(
         sanitizeLandingPageDraftSpec({
@@ -1111,28 +1460,32 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
               ...prevMap,
               [styleKey]: { ...preset.style },
             },
+            elementFreeLayouts: nextEfl,
           },
         }),
-        [`${block.id}.headline`, `${styleKey}.style`],
+        [`${block.id}.headline`, `${styleKey}.style`, `${block.id}.freeLayout`],
       ),
     );
     selectCanvas({ blockId: block.id, element: 'headline', field: 'headline' });
     setSaveMsg(`Đã chèn tiêu đề «${preset.label}»`);
   }
 
-  /** Insert paragraph-only Benefits (subheadline + empty items). */
+  /** Insert paragraph text layer — free section at drop pointer. */
   function insertParagraphPreset(preset: LandingPageParagraphPreset, pos?: LpSidebarInsertPos) {
     ensureLandingPageTitleFonts();
     const current = specRef.current;
     const blocks = [...current.blocks];
     const insertAt = resolveInsertIndex(blocks, pos);
+    const freeLayout = resolveTextLayerFreeLayout(blocks, pos);
     const block = {
       ...defaultBlock('Benefits'),
       type: 'Benefits' as const,
       headline: '',
       subheadline: preset.text,
       items: [] as Array<{ id: string; title: string; description: string }>,
-      spacing: 'sm' as const,
+      spacing: 'none' as const,
+      positionMode: 'free' as const,
+      freeLayout: { ...freeLayout, width: 520, height: 96 },
     };
     blocks.splice(insertAt, 0, block);
     const styleKey = `${block.id}::subheadline`;
@@ -1140,6 +1493,12 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       (current.meta && typeof current.meta === 'object'
         ? (current.meta as { inlineTextStyles?: Record<string, LandingPageInlineTextStyle> }).inlineTextStyles
         : null) || {};
+    const prevEfl =
+      (current.meta && typeof current.meta === 'object'
+        ? (current.meta as { elementFreeLayouts?: Record<string, LandingPageFreeLayout> }).elementFreeLayouts
+        : null) || {};
+    const nextEfl = { ...prevEfl };
+    delete nextEfl[styleKey];
     pushHistory(
       markLandingPageUserEdits(
         sanitizeLandingPageDraftSpec({
@@ -1151,9 +1510,10 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
               ...prevMap,
               [styleKey]: { ...preset.style },
             },
+            elementFreeLayouts: nextEfl,
           },
         }),
-        [`${block.id}.subheadline`, `${styleKey}.style`],
+        [`${block.id}.subheadline`, `${styleKey}.style`, `${block.id}.freeLayout`],
       ),
     );
     selectCanvas({ blockId: block.id, element: 'subheadline', field: 'subheadline' });
@@ -1228,9 +1588,38 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       style: { ...preset.style },
     };
     blocks.splice(insertAt, 0, block);
+    // Typography extras (fontFamily / italic / underline / transform) live in
+    // inlineTextStyles so Inspector + mergeTextStyle apply them without renderer changes.
+    const styleKey = `${block.id}::ctaLabel`;
+    const prevMap =
+      (current.meta && typeof current.meta === 'object'
+        ? (current.meta as { inlineTextStyles?: Record<string, LandingPageInlineTextStyle> })
+            .inlineTextStyles
+        : null) || {};
+    const textExtras: LandingPageInlineTextStyle = {};
+    const s = preset.style;
+    if (s.fontFamily) textExtras.fontFamily = s.fontFamily;
+    if (s.fontStyle) textExtras.fontStyle = s.fontStyle;
+    if (s.textTransform) textExtras.textTransform = s.textTransform;
+    if (s.textDecoration) textExtras.textDecoration = s.textDecoration;
+    const hasTextExtras = Object.keys(textExtras).length > 0;
     pushHistory(
       markLandingPageUserEdits(
-        sanitizeLandingPageDraftSpec({ ...current, blocks }),
+        sanitizeLandingPageDraftSpec({
+          ...current,
+          blocks,
+          ...(hasTextExtras
+            ? {
+                meta: {
+                  ...(current.meta || {}),
+                  inlineTextStyles: {
+                    ...prevMap,
+                    [styleKey]: textExtras,
+                  },
+                },
+              }
+            : null),
+        }),
         [`${block.id}.ctaLabel`],
       ),
     );
@@ -1370,6 +1759,58 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     setSaveMsg('Đã thêm Gallery với ảnh đã chọn');
   }
 
+  function openSectionLibrary(pos?: LpSidebarInsertPos | null) {
+    sectionLibraryPosRef.current = pos ?? null;
+    setSectionLibraryOpen(true);
+  }
+
+  function openButtonLibrary(pos?: LpSidebarInsertPos | null) {
+    buttonLibraryPosRef.current = pos ?? null;
+    setButtonLibraryOpen(true);
+  }
+
+  function insertLibraryButtonTemplate(templateId: string) {
+    const tpl = getButtonLibraryTemplate(templateId);
+    if (!tpl) return;
+    ensureLandingPageTitleFonts();
+    const pos = buttonLibraryPosRef.current ?? undefined;
+    buttonLibraryPosRef.current = null;
+    insertButtonPreset(buttonLibraryTemplateToPreset(tpl), pos);
+  }
+
+  function insertLibrarySectionTemplate(templateId: string) {
+    const tpl = getSectionLibraryTemplate(templateId);
+    if (!tpl) return;
+    const current = specRef.current;
+    const blocks = [...current.blocks];
+    const insertAt = resolveInsertIndex(blocks, sectionLibraryPosRef.current ?? undefined);
+    const block = materializeSectionLibraryTemplate(tpl, uid);
+    blocks.splice(insertAt, 0, block);
+    pushHistory(sanitizeLandingPageDraftSpec({ ...current, blocks }));
+    selectCanvas({ blockId: block.id, element: 'section' });
+    sectionLibraryPosRef.current = null;
+    setSaveMsg(`Đã thêm section «${tpl.label}»`);
+  }
+
+  function insertBlankSection() {
+    const current = specRef.current;
+    const blocks = [...current.blocks];
+    const insertAt = resolveInsertIndex(blocks, sectionLibraryPosRef.current ?? undefined);
+    const block = {
+      ...defaultBlock('Benefits'),
+      headline: 'Section mới',
+      subheadline: '',
+      items: [] as Array<{ id: string; title: string; description: string }>,
+      spacing: 'md' as const,
+      variant: 'minimal-list',
+    };
+    blocks.splice(insertAt, 0, block);
+    pushHistory(sanitizeLandingPageDraftSpec({ ...current, blocks }));
+    selectCanvas({ blockId: block.id, element: 'section' });
+    sectionLibraryPosRef.current = null;
+    setSaveMsg('Đã thêm phần trống');
+  }
+
   function insertSidebarPreset(payload: LpSidebarPresetPayload, pos: LpSidebarInsertPos) {
     switch (payload.kind) {
       case 'title':
@@ -1402,6 +1843,12 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       case 'section-preset':
         addBlocks(payload.types, { pos, select: 'first' });
         setSaveMsg(`Đã chèn section mẫu (${payload.types.length} block)`);
+        return;
+      case 'section-library-open':
+        openSectionLibrary(pos);
+        return;
+      case 'button-library-open':
+        openButtonLibrary(pos);
         return;
       default:
         return;
@@ -1587,41 +2034,101 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
   }
 
   /**
-   * Union of a section's DIRECT children's rendered boxes — the section's own
-   * <section> element always reports 100% of the canvas width via
-   * getBoundingClientRect(), even when its actual visible content is a much
-   * narrower, centered card (e.g. `<section class="flex justify-center">` wrapping
-   * a `max-w-lg` form — the classic LeadForm shape). Measuring the outer shell
-   * for a section like that gives x=0 and no width, so once it goes
-   * position:absolute (shrink-to-fit, nothing left to center within) the visible
-   * card renders pinned to the left edge of a much wider invisible box — exactly
-   * "form nằm ngoài khung nội dung". Measuring the children's union instead gives
-   * the box the user actually SEES.
+   * Grow OR shrink section shell so painted content (incl. transform/absolute
+   * children) matches the selection chrome — never leave an empty tall frame
+   * covering the next section, and never leave content overflowing outside.
    */
-  function measureVisibleContentRect(
-    shell: HTMLElement,
-  ): { left: number; top: number; width: number; height: number } {
-    // Deep content only — free-layout stretches wrappers to inflated section height.
-    let minLeft = Infinity;
-    let minTop = Infinity;
-    let maxRight = -Infinity;
-    let maxBottom = -Infinity;
-    const nodes = shell.querySelectorAll(
-      '[data-lp-element-id],[data-lp-inline-field],[data-lp-free-child],[data-lp-content-image],[data-lp-form-hit],[data-lp-card-item],[data-lp-box-hit],h1,h2,h3,h4,p,li,img,video',
+  function fitSectionToContent(
+    blockId: string,
+    viewport: Viewport,
+    opts?: { live?: boolean; padding?: number },
+  ) {
+    const shell = document.querySelector(
+      `[data-lp-block-id="${CSS.escape(blockId)}"][data-lp-section-chrome="1"]`,
+    ) as HTMLElement | null;
+    if (!shell) return;
+    const pad = opts?.padding ?? SECTION_CONTENT_FIT_PADDING;
+    const scale = readCanvasPointerScale(shell);
+    const needed = Math.min(
+      2400,
+      Math.max(72, measureSectionContentHeightCss(shell, scale) + pad),
     );
-    for (const child of Array.from(nodes)) {
-      const r = (child as HTMLElement).getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) continue;
-      minLeft = Math.min(minLeft, r.left);
-      minTop = Math.min(minTop, r.top);
-      maxRight = Math.max(maxRight, r.right);
-      maxBottom = Math.max(maxBottom, r.bottom);
+    const current = specRef.current;
+    const block = current.blocks.find((b) => b.id === blockId);
+    if (!block) return;
+    const free = resolveFreeLayoutForViewport(
+      block.positionMode,
+      block.freeLayout,
+      block.responsiveFreeLayout,
+      viewport,
+    );
+
+    if (opts?.live) {
+      if (free) {
+        shell.style.height = `${needed}px`;
+        shell.style.minHeight = `${needed}px`;
+      } else {
+        shell.style.minHeight = `${needed}px`;
+      }
+      return;
     }
-    if (minLeft === Infinity) {
-      const r = shell.getBoundingClientRect();
-      return { left: r.left, top: r.top, width: r.width, height: Math.min(r.height, 400) };
+
+    if (free) {
+      const cur = Math.round(free.height ?? free.reserveHeight ?? 0);
+      // Height unchanged: still pack siblings — expand-in-place can leave overlap
+      // that a later no-op fit would otherwise skip forever.
+      if (Math.abs(needed - cur) <= 2) {
+        const packed = packFreeSectionsVertical(current.blocks, viewport);
+        if (packed !== current.blocks) {
+          pushHistory(
+            markLandingPageUserEdits({ ...current, blocks: packed }, [
+              `${blockId}.freeLayout.pack`,
+            ]),
+          );
+        }
+        return;
+      }
+      const nextLayout = clampAbsoluteFreeLayout({
+        ...free,
+        height: needed,
+        reserveHeight: needed,
+      });
+      const nextBlocks = reflowFreeSectionsAfterChange(
+        current.blocks,
+        blockId,
+        free,
+        nextLayout,
+        viewport,
+      );
+      pushHistory(
+        markLandingPageUserEdits({ ...current, blocks: nextBlocks }, [
+          `${blockId}.freeLayout.height`,
+        ]),
+      );
+      return;
     }
-    return { left: minLeft, top: minTop, width: maxRight - minLeft, height: maxBottom - minTop };
+
+    const style = { ...((block.style || {}) as Record<string, unknown>) };
+    const curMin = Number.parseFloat(String(style.minHeight || '0')) || 0;
+    // Allow shrink when a prior bad free-surface snap inflated minHeight (mega-section).
+    if (needed <= curMin + 1 && needed >= curMin - 1) return;
+    const nextMin = needed;
+    // Live DOM heal so overlapping drop targets clear before the next paint.
+    shell.style.minHeight = `${nextMin}px`;
+    if (Math.abs(nextMin - curMin) <= 1) return;
+    pushHistory(
+      markLandingPageUserEdits(
+        {
+          ...current,
+          blocks: current.blocks.map((b) =>
+            b.id === blockId
+              ? ({ ...b, style: { ...style, minHeight: `${nextMin}px` } } as LandingPageBlock)
+              : b,
+          ),
+        },
+        [`${blockId}.style.minHeight`],
+      ),
+    );
   }
 
   /**
@@ -1653,22 +2160,84 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       const s = scale > 0.05 && Number.isFinite(scale) ? scale : 1;
       const content = measureVisibleContentRect(shell);
       const origin = root.getBoundingClientRect();
+      // Canvas-local (same space as freeLayoutStyle left/top).
       x = Math.max(0, Math.round((content.left - origin.left) / s));
       y = Math.max(0, Math.round((content.top - origin.top) / s));
       if (width == null && content.width > 0) {
         width = Math.round(content.width);
       }
-      const visualH = Math.round(content.height || 0) + 24;
-      height = Math.min(2400, Math.max(72, visualH));
+      const cssH = measureSectionContentHeightCss(shell, s) + SECTION_CONTENT_FIT_PADDING;
+      const visualH = Math.round(content.height) + SECTION_CONTENT_FIT_PADDING;
+      // Hug content — do not keep a stale inflated prev height.
+      height = Math.min(2400, Math.max(72, visualH, Math.min(cssH, 2400)));
     }
 
     return { x, y, width, height };
   }
 
+  /**
+   * After paint: reseat free section chrome so left/top/height match painted content.
+   * Fixes legacy saves where frame floated over the next section (wrong origin / tall height).
+   */
+  function healFreeSectionFramesToContent() {
+    const current = specRef.current;
+    const root = document.querySelector('[data-lp-canvas-root]') as HTMLElement | null;
+    if (!root) return;
+    const scale = readCanvasPointerScale(root);
+    const s = scale > 0.05 && Number.isFinite(scale) ? scale : 1;
+    const origin = root.getBoundingClientRect();
+    let changed = false;
+    const nextBlocks = current.blocks.map((b) => {
+      if (b.positionMode !== 'free' || !b.freeLayout) return b;
+      const shell = document.querySelector(
+        `[data-lp-block-id="${CSS.escape(b.id)}"][data-lp-section-chrome="1"]`,
+      ) as HTMLElement | null;
+      if (!shell) return b;
+      const content = measureVisibleContentRect(shell);
+      const nextX = Math.max(0, Math.round((content.left - origin.left) / s));
+      const nextY = Math.max(0, Math.round((content.top - origin.top) / s));
+      // Height from real painted nodes only (measureVisibleContentRect) — never
+      // trust the stretched free-layout wrapper height.
+      const nextH = Math.min(
+        2400,
+        Math.max(48, Math.round(content.height) + SECTION_CONTENT_FIT_PADDING),
+      );
+      const prev = b.freeLayout;
+      const dx = Math.abs((prev.x || 0) - nextX);
+      const dy = Math.abs((prev.y || 0) - nextY);
+      const dh = Math.abs((prev.height || prev.reserveHeight || 0) - nextH);
+      // Reseat when chrome drifts from content, or height is inflated empty space.
+      if (dx < 12 && dy < 12 && dh < 24) return b;
+      changed = true;
+      return {
+        ...b,
+        freeLayout: clampAbsoluteFreeLayout({
+          ...prev,
+          x: nextX,
+          y: nextY,
+          height: nextH,
+          reserveHeight: nextH,
+          ...(prev.width != null
+            ? { width: prev.width }
+            : content.width > 0
+              ? { width: Math.round(content.width) }
+              : {}),
+        }),
+      } as LandingPageBlock;
+    });
+    if (!changed) return;
+    // Silent adopt — no history entry (load/heal, not a user edit).
+    const next = { ...current, blocks: nextBlocks };
+    specRef.current = next;
+    setSpec(next);
+    dirtyRef.current = true;
+  }
+
   /** Toolbar «Tự do» — toggle free position (drag uses body when on). */
   function toggleBlockFreePosition(blockId: string) {
     if (!guardSectionUnlocked(blockId, 'Section đang khóa — mở khóa trước khi đổi vị trí')) return;
-    const block = specRef.current.blocks.find((b) => b.id === blockId);
+    const current = specRef.current;
+    const block = current.blocks.find((b) => b.id === blockId);
     if (!block) return;
     if (block.positionMode === 'free') {
       updateBlock(blockId, { positionMode: 'flow' } as Partial<LandingPageBlock>);
@@ -1676,17 +2245,28 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     }
     const prev = block.freeLayout;
     const { x, y, width, height } = measureFreeToggleLayout(blockId, prev);
-    updateBlock(blockId, {
-      positionMode: 'free',
-      freeLayout: clampAbsoluteFreeLayout({
-        x,
-        y,
-        ...(width ? { width } : {}),
-        height,
-        reserveHeight: height,
-        ...(prev?.rotate != null ? { rotate: prev.rotate } : {}),
-      }),
-    } as Partial<LandingPageBlock>);
+    const freeLayout = clampAbsoluteFreeLayout({
+      x,
+      y,
+      ...(width ? { width } : {}),
+      height,
+      reserveHeight: height,
+      ...(prev?.rotate != null ? { rotate: prev.rotate } : {}),
+    });
+    // Keep the measured seat — do NOT run vertical pack (that rewrote y and
+    // dropped free chrome onto neighbouring flow sections).
+    const nextBlocks = current.blocks.map((b) =>
+      b.id === blockId
+        ? ({ ...b, positionMode: 'free' as const, freeLayout } as LandingPageBlock)
+        : b,
+    );
+    pushHistory(
+      markLandingPageUserEdits({ ...current, blocks: nextBlocks }, [
+        `${blockId}.positionMode`,
+        `${blockId}.freeLayout`,
+      ]),
+    );
+    requestAnimationFrame(() => fitSectionToContent(blockId, viewport));
   }
 
   /** Delete one or more sections in a single history entry (keyboard / multi-select). */
@@ -1906,6 +2486,20 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
         ) {
           return { ...b, [field]: value } as LandingPageBlock;
         }
+        const trustM = /^trustPoint:(\d+)$/.exec(field);
+        if (trustM) {
+          const idx = Number(trustM[1]);
+          const fallback = ['Tư vấn rõ ràng', 'Phản hồi nhanh', 'Cam kết minh bạch'];
+          const existing =
+            'trustPoints' in b && Array.isArray((b as { trustPoints?: string[] }).trustPoints)
+              ? (b as { trustPoints: string[] }).trustPoints
+              : null;
+          const prev =
+            existing && existing.length > 0 ? [...existing] : [...fallback];
+          while (prev.length <= idx) prev.push(fallback[prev.length] || '');
+          prev[idx] = value;
+          return { ...b, trustPoints: prev } as LandingPageBlock;
+        }
         const itemM = /^(itemTitle|itemDesc|itemQuestion|itemAnswer|itemQuote|itemAuthor):(.+)$/.exec(
           field,
         );
@@ -1976,7 +2570,8 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     const next = applyNestedBlockField(current, id, field, value);
     const marked = markLandingPageUserEdits(next, [`${id}.${field}`]);
     revisionRef.current += 1;
-    setSpec(marked);
+    specRef.current = marked;
+    startTransition(() => setSpec(marked));
     dirtyRef.current = true;
   }
 
@@ -1986,8 +2581,10 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     inlineHistStarted.current = false;
     const current = specRef.current;
     const next = applyNestedBlockField(current, id, field, value);
+    const marked = markLandingPageUserEdits(next, [`${id}.${field}`]);
     revisionRef.current += 1;
-    setSpec(markLandingPageUserEdits(next, [`${id}.${field}`]));
+    specRef.current = marked;
+    startTransition(() => setSpec(marked));
     dirtyRef.current = true;
   }
 
@@ -2073,6 +2670,44 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     setSaveMsg(nextHidden ? 'Đã ẩn phần tử' : 'Đã hiện phần tử');
   }
 
+  /**
+   * Keyboard Delete on a nested canvas element (trust icon, text, box chrome…).
+   * Never escalates to deleting the parent Hero/section.
+   */
+  function hideCanvasElements(targets: LpSelectionTarget[]) {
+    if (!targets.length) return;
+    const current = specRef.current;
+    const prev =
+      (current.meta as { elementHidden?: Record<string, boolean> } | undefined)?.elementHidden ||
+      {};
+    const nextMap = { ...prev };
+    const editKeys: string[] = [];
+    for (const t of targets) {
+      if (!guardSectionUnlocked(t.blockId, 'Section đang khóa — mở khóa trước khi xóa phần tử')) {
+        continue;
+      }
+      const fieldOrEl = t.field || t.element;
+      if (!fieldOrEl || isSectionLevelElement(t.element)) continue;
+      const key = elementStyleKey(t.blockId, fieldOrEl);
+      nextMap[key] = true;
+      editKeys.push(`${key}.hidden`);
+    }
+    if (!editKeys.length) return;
+    pushHistory(
+      markLandingPageUserEdits(
+        {
+          ...current,
+          meta: {
+            ...(current.meta || {}),
+            elementHidden: nextMap,
+          },
+        },
+        editKeys,
+      ),
+    );
+    setSaveMsg(editKeys.length === 1 ? 'Đã xóa phần tử' : `Đã xóa ${editKeys.length} phần tử`);
+  }
+
   function toggleElementLock(blockId: string, field: string) {
     const key = elementStyleKey(blockId, field);
     const current = specRef.current;
@@ -2096,6 +2731,91 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       ),
     );
     setSaveMsg(nextLocked ? 'Đã khóa phần tử' : 'Đã mở khóa phần tử');
+  }
+
+  const LP_SAVED_BLOCKS_LS = 'mkspa.lpSavedBlocks.v1';
+
+  function saveTargetToSavedLibrary(target: LpSelectionTarget) {
+    const blockId = target.blockId;
+    const block = specRef.current.blocks.find((b) => b.id === blockId);
+    if (!block) return;
+    if (isSectionLevelElement(target.element) || target.element === 'form') {
+      try {
+        const clone = cloneSpec({ blocks: [block] } as LandingPageSpec).blocks[0];
+        const raw = localStorage.getItem(LP_SAVED_BLOCKS_LS);
+        const list = raw ? (JSON.parse(raw) as unknown[]) : [];
+        const rec = block as Record<string, unknown>;
+        const label =
+          (typeof rec.headline === 'string' && rec.headline.trim()) ||
+          (typeof rec.ctaLabel === 'string' && rec.ctaLabel.trim()) ||
+          block.type ||
+          'Section';
+        const next = [
+          {
+            id: `sb-${Date.now()}`,
+            label: String(label).slice(0, 64),
+            block: clone,
+            savedAt: new Date().toISOString(),
+          },
+          ...(Array.isArray(list) ? list : []),
+        ].slice(0, 40);
+        localStorage.setItem(LP_SAVED_BLOCKS_LS, JSON.stringify(next));
+        setSaveMsg('Đã lưu vào Khối đã lưu');
+      } catch {
+        setSaveMsg('Lưu khối thất bại');
+      }
+      return;
+    }
+    const field =
+      target.field ||
+      (target.element === 'cta' ? 'ctaLabel' : target.element === 'headline' ? 'headline' : null);
+    if (field) {
+      saveTextAsset(blockId, field);
+      return;
+    }
+    setSaveMsg('Chọn phần tử có nội dung để lưu');
+  }
+
+  function duplicateToolbarTarget(target: LpSelectionTarget) {
+    const norm = normalizeLpSelectionTarget(target);
+    if (isSectionLevelElement(norm.element) || norm.element === 'form') {
+      dupBlock(norm.blockId);
+      return;
+    }
+    if (typeof norm.element === 'string' && norm.element.startsWith('item:')) {
+      dupItem(norm.blockId, norm.element.slice(5));
+      return;
+    }
+    const block = specRef.current.blocks.find((b) => b.id === norm.blockId);
+    if (block && isFloatingTextLayerBlock(block)) {
+      dupBlock(norm.blockId, norm.element);
+      return;
+    }
+    if (block?.type === 'CTA') {
+      const b = block as LandingPageBlock & {
+        headline?: string;
+        subheadline?: string;
+        body?: string;
+      };
+      const buttonOnly =
+        !(b.headline || '').trim() &&
+        !(b.subheadline || '').trim() &&
+        !(b.body || '').trim();
+      if (buttonOnly) {
+        dupBlock(norm.blockId, 'cta');
+        return;
+      }
+    }
+    dupBlock(norm.blockId, norm.element);
+  }
+
+  function deleteToolbarTarget(target: LpSelectionTarget) {
+    const norm = normalizeLpSelectionTarget(target);
+    if (isSectionLevelElement(norm.element)) {
+      removeBlock(norm.blockId);
+      return;
+    }
+    hideCanvasElements([norm]);
   }
 
   function saveTextAsset(blockId: string, field: string) {
@@ -2333,7 +3053,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     setInspectorTab('content');
     requestAnimationFrame(() => {
       const input = inspectorPanelRef.current?.querySelector(
-        '[data-lp-inspector-button-link] input',
+        '[data-lp-button-link-value], [data-lp-button-label]',
       ) as HTMLInputElement | null;
       input?.focus();
     });
@@ -2838,40 +3558,211 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     if (payload.viewport === 'mobile') return;
     const key = `${blockId}::${field}`;
     const current = specRef.current;
+    const block = current.blocks.find((b) => b.id === blockId);
+    // Text-layer sections (Heading/Paragraph): element drag moves the SECTION.
+    // Never persist a second translate on the text node — that double-applied
+    // transform and let y go negative into neighbouring sections.
+    if (block && isLpTextLayerBlock(block) && !field.startsWith('__element:')) {
+      let prevSection = resolveFreeLayoutForViewport(
+        block.positionMode,
+        block.freeLayout,
+        block.responsiveFreeLayout,
+        payload.viewport,
+      );
+      if (!prevSection) {
+        // First free move from flow: seed from live section box in canvas-local space.
+        const shell = document.querySelector(
+          `[data-lp-block-id="${CSS.escape(blockId)}"][data-lp-section-chrome="1"]`,
+        ) as HTMLElement | null;
+        const root = shell?.closest('[data-lp-canvas-root]') as HTMLElement | null;
+        if (shell && root) {
+          const scale = readCanvasPointerScale(shell);
+          const s = scale > 0.05 ? scale : 1;
+          const sr = shell.getBoundingClientRect();
+          const rr = root.getBoundingClientRect();
+          prevSection = {
+            x: Math.round((sr.left - rr.left) / s),
+            y: Math.round((sr.top - rr.top) / s),
+            width: Math.round(sr.width / s) || 420,
+            height: Math.round(sr.height / s) || 72,
+          };
+        } else {
+          prevSection = { x: 0, y: 0, width: 420, height: 72 };
+        }
+      }
+      const nextSection = clampAbsoluteFreeLayout({
+        ...prevSection,
+        x: Math.round((prevSection.x || 0) + (payload.freeLayout.x || 0)),
+        y: Math.round((prevSection.y || 0) + (payload.freeLayout.y || 0)),
+        width: prevSection.width || payload.freeLayout.width || 420,
+        height: prevSection.height || 72,
+        reserveHeight: prevSection.reserveHeight || prevSection.height || 72,
+      });
+      const prevEfl =
+        (current.meta && typeof current.meta === 'object'
+          ? (current.meta as { elementFreeLayouts?: Record<string, LandingPageFreeLayout> })
+              .elementFreeLayouts
+          : null) || {};
+      const nextEfl = { ...prevEfl };
+      delete nextEfl[key];
+      // Text layers: update this section only — reflowFreeSectionsAfterChange is a
+      // no-op pack for floating text layers (keeps exact x/y).
+      const nextBlocks = reflowFreeSectionsAfterChange(
+        current.blocks.map((b) =>
+          b.id === blockId
+            ? ({
+                ...b,
+                positionMode: 'free' as const,
+                freeLayout: nextSection,
+                spacing: 'none' as const,
+              } as LandingPageBlock)
+            : b,
+        ),
+        blockId,
+        prevSection,
+        nextSection,
+        payload.viewport,
+      );
+      pushHistory(
+        markLandingPageUserEdits(
+          {
+            ...current,
+            blocks: nextBlocks,
+            meta: { ...(current.meta || {}), elementFreeLayouts: nextEfl },
+          },
+          [`${blockId}.freeLayout`],
+        ),
+      );
+      return;
+    }
     const prevMap =
       (current.meta && typeof current.meta === 'object'
         ? (current.meta as { elementFreeLayouts?: Record<string, LandingPageFreeLayout> }).elementFreeLayouts
         : null) || {};
+    // Text hug: never persist a locked geometric height from free-drag measure.
+    const keyLooksText = !field.startsWith('__element:');
+    const freeLayout = keyLooksText
+      ? {
+          x: payload.freeLayout.x,
+          y: payload.freeLayout.y,
+          ...(payload.freeLayout.width != null ? { width: payload.freeLayout.width } : null),
+          ...(payload.freeLayout.rotate != null ? { rotate: payload.freeLayout.rotate } : null),
+        }
+      : payload.freeLayout;
+    const nextMeta = {
+      ...(current.meta || {}),
+      elementFreeLayouts: {
+        ...prevMap,
+        [key]: freeLayout,
+      },
+    };
+    // Spec heuristic grow (works before paint); DOM fit below after push.
+    // Capture PREV free height BEFORE expand — expand grows in place and used to
+    // skip reflow when "needed" already matched the expanded height, leaving the
+    // next free section painted on top.
+    const prevParentFree = (() => {
+      const parent = current.blocks.find((b) => b.id === blockId);
+      if (!parent) return null;
+      return resolveFreeLayoutForViewport(
+        parent.positionMode,
+        parent.freeLayout,
+        parent.responsiveFreeLayout,
+        payload.viewport,
+      );
+    })();
+    let nextBlocks = expandBlocksToFitElementLayouts(
+      current.blocks,
+      nextMeta.elementFreeLayouts as Record<string, LandingPageFreeLayout>,
+      payload.viewport,
+    );
+    // Prefer live DOM bottom (offset-mode y is translate, not section-absolute).
+    let domNeeded = 0;
+    const shell = document.querySelector(
+      `[data-lp-block-id="${CSS.escape(blockId)}"][data-lp-section-chrome="1"]`,
+    ) as HTMLElement | null;
+    if (shell) {
+      const scale = readCanvasPointerScale(shell);
+      domNeeded =
+        measureSectionContentHeightCss(shell, scale) + SECTION_CONTENT_FIT_PADDING;
+    }
+    const parent = nextBlocks.find((b) => b.id === blockId);
+    const parentFree = parent
+      ? resolveFreeLayoutForViewport(
+          parent.positionMode,
+          parent.freeLayout,
+          parent.responsiveFreeLayout,
+          payload.viewport,
+        )
+      : null;
+    if (prevParentFree && parentFree) {
+      const childBottom =
+        Math.max(0, freeLayout.y ?? 0) +
+        Math.max(28, freeLayout.height ?? 48) +
+        SECTION_CONTENT_FIT_PADDING;
+      const needed = Math.max(
+        parentFree.height || 0,
+        childBottom,
+        domNeeded > 0 ? Math.min(domNeeded, 2400) : 0,
+      );
+      nextBlocks = reflowFreeSectionsAfterChange(
+        nextBlocks,
+        blockId,
+        prevParentFree,
+        ensureSectionFreeLayoutHeight({ ...parentFree, height: needed }),
+        payload.viewport,
+      );
+    } else if (parentFree) {
+      const childBottom =
+        Math.max(0, freeLayout.y ?? 0) +
+        Math.max(28, freeLayout.height ?? 48) +
+        SECTION_CONTENT_FIT_PADDING;
+      const needed = Math.max(
+        parentFree.height || 0,
+        childBottom,
+        domNeeded > 0 ? Math.min(domNeeded, 2400) : 0,
+      );
+      if (needed > (parentFree.height || 0) + 1) {
+        nextBlocks = reflowFreeSectionsAfterChange(
+          nextBlocks,
+          blockId,
+          parentFree,
+          ensureSectionFreeLayoutHeight({ ...parentFree, height: needed }),
+          payload.viewport,
+        );
+      }
+    } else {
+      // Flow parent: expand already set minHeight; pack free siblings if any remain.
+      nextBlocks = packFreeSectionsVertical(nextBlocks, payload.viewport);
+    }
     pushHistory(
       markLandingPageUserEdits(
         {
           ...current,
-          meta: {
-            ...(current.meta || {}),
-            elementFreeLayouts: {
-              ...prevMap,
-              [key]: payload.freeLayout,
-            },
-          },
+          blocks: nextBlocks,
+          meta: nextMeta,
         },
         [`${key}.freeLayout`],
       ),
     );
+    // After paint: precise DOM measure (transform-aware) + sibling reflow.
+    requestAnimationFrame(() => fitSectionToContent(blockId, payload.viewport));
   }
 
-  /** Text box 8-handle resize — style width/height + free offset in ONE history entry. */
+  /** Text box 8-handle resize — style width/height (+ typography on corner scale) + free offset in ONE history entry. */
   function commitTextBoxResize(
     blockId: string,
     field: string,
     payload: {
       width: number;
       height: number;
+      fontSize?: number;
+      lineHeight?: number | string;
+      scaleTypography?: boolean;
       freeLayout: LandingPageFreeLayout;
       viewport: Viewport;
     },
   ) {
     if (!guardSectionUnlocked(blockId)) return;
-    if (payload.viewport === 'mobile') return;
     const key = elementStyleKey(blockId, field);
     const current = specRef.current;
     const meta = (current.meta && typeof current.meta === 'object' ? current.meta : {}) as {
@@ -2887,12 +3778,28 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     const merged = {
       ...prev,
       width: payload.width,
-      height: payload.height,
-    } as LandingPageInlineTextStyle;
+      ...(payload.scaleTypography &&
+      typeof payload.fontSize === 'number' &&
+      payload.fontSize > 0
+        ? {
+            fontSize: payload.fontSize,
+            fontSizeUnit: 'px' as const,
+            ...(payload.lineHeight != null ? { lineHeight: payload.lineHeight } : null),
+          }
+        : null),
+    } as LandingPageInlineTextStyle & Record<string, unknown>;
+    // Text hug: never lock a taller empty frame from prior geometric height commits.
+    delete merged.height;
+    const freeLayoutHug = {
+      x: payload.freeLayout.x,
+      y: payload.freeLayout.y,
+      width: payload.freeLayout.width,
+    };
     const prevRespMap = meta.responsiveInlineTextStyles || {};
     const prevViewport = prevRespMap[key] || {};
     const prevFree = meta.elementFreeLayouts || {};
-    // Grow parent free section if child bottom exceeds committed height.
+    // Grow parent free section if child bottom exceeds committed height — always
+    // reflow from PREV layout when height changes (never grow in place only).
     let nextBlocks = current.blocks;
     const parent = current.blocks.find((b) => b.id === blockId);
     const parentFree = parent
@@ -2905,8 +3812,23 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       : null;
     if (parentFree) {
       const childBottom =
-        Math.max(0, payload.freeLayout.y) + Math.max(28, payload.height) + 24;
-      const needed = Math.max(parentFree.height || 0, childBottom);
+        Math.max(0, payload.freeLayout.y) +
+        Math.max(28, payload.height) +
+        SECTION_CONTENT_FIT_PADDING;
+      let domNeeded = 0;
+      const shell = document.querySelector(
+        `[data-lp-block-id="${CSS.escape(blockId)}"][data-lp-section-chrome="1"]`,
+      ) as HTMLElement | null;
+      if (shell) {
+        const scale = readCanvasPointerScale(shell);
+        domNeeded =
+          measureSectionContentHeightCss(shell, scale) + SECTION_CONTENT_FIT_PADDING;
+      }
+      const needed = Math.max(
+        parentFree.height || 0,
+        childBottom,
+        domNeeded > 0 ? Math.min(domNeeded, 2400) : 0,
+      );
       if (needed > (parentFree.height || 0) + 1) {
         nextBlocks = reflowFreeSectionsAfterChange(
           current.blocks,
@@ -2915,6 +3837,8 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
           ensureSectionFreeLayoutHeight({ ...parentFree, height: needed }),
           payload.viewport,
         );
+      } else {
+        nextBlocks = packFreeSectionsVertical(current.blocks, payload.viewport);
       }
     }
     pushHistory(
@@ -2931,13 +3855,14 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
             },
             elementFreeLayouts: {
               ...prevFree,
-              [key]: payload.freeLayout,
+              [key]: freeLayoutHug,
             },
           },
         },
         [`${key}.textBoxResize`],
       ),
     );
+    requestAnimationFrame(() => fitSectionToContent(blockId, payload.viewport));
   }
 
   function commitItemFreeLayout(
@@ -2985,6 +3910,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       }),
     };
     pushHistory(markLandingPageUserEdits(next, [`${blockId}.item.${itemId}.freeLayout`]));
+    requestAnimationFrame(() => fitSectionToContent(blockId, payload.viewport));
   }
 
   const canvasActionRef = useRef({
@@ -2994,6 +3920,8 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     dupBlock,
     dupItem,
     removeBlock,
+    removeBlocks,
+    hideCanvasElements,
     moveBlock,
     reorderBlockById,
     reorderListItem,
@@ -3020,6 +3948,8 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     dupBlock,
     dupItem,
     removeBlock,
+    removeBlocks,
+    hideCanvasElements,
     moveBlock,
     reorderBlockById,
     reorderListItem,
@@ -3278,6 +4208,12 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
         canvasActionRef.current.commitItemFreeLayout(blockId, itemId, payload),
       getElementFreeLayout: (blockId, field) => {
         if (viewport === 'mobile') return null;
+        const block = specRef.current.blocks.find((b) => b.id === blockId);
+        // Text-layer sections own position via section.freeLayout — never paint a
+        // second element translate (double transform / cross-section overlap).
+        if (block && isLpTextLayerBlock(block) && !field.startsWith('__element:')) {
+          return null;
+        }
         const map =
           (specRef.current.meta as { elementFreeLayouts?: Record<string, LandingPageFreeLayout> } | undefined)
             ?.elementFreeLayouts || {};
@@ -3529,6 +4465,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
     <div
       className="flex h-full min-h-0 flex-col overflow-hidden"
       data-lp-builder-root
+      data-lp-builder-vertical-toolbars="1"
       data-lp-inspector-mode={inspectorMode}
       data-lp-canvas-scroll-mode="internal"
       data-lp-fullscreen-preview={fullscreenPreview ? '1' : undefined}
@@ -3584,7 +4521,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
       {actionBarMounted && doctorUndoVersion != null && !fullscreenPreview
         ? createPortal(
             <div
-              className="fixed bottom-4 right-4 z-[58]"
+              className="fixed bottom-4 right-4 z-[58] max-[767px]:bottom-20 max-[767px]:right-3"
               data-lp-doctor-undo-toast
             >
               <Button
@@ -3737,117 +4674,38 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
         </div>
       ) : null}
 
-      {!fullscreenPreview ? (
-      <LandingPageBuilderSidebar
-          blocks={spec.blocks}
-          selectedId={selectedId}
-          onSelectBlock={(id) => {
-            selectCanvas({ blockId: id, element: 'section' });
-          }}
-          onReorderBlocks={(fromIndex, toIndex) => {
-            const moving = spec.blocks[fromIndex];
-            if (moving?.locked) {
-              setSaveMsg('Section đang khóa — mở khóa trước khi di chuyển');
-              return;
-            }
-            pushHistory(
-              sanitizeLandingPageDraftSpec({
-                ...spec,
-                blocks: reorderBlocks(spec.blocks, fromIndex, toIndex),
-              }),
-            );
-          }}
-          onDupBlock={dupBlock}
-          onRemoveBlock={removeBlock}
-          onAddBlock={addBlock}
-          onAddBlocks={addBlocks}
-          themeSpec={spec}
-          onThemeChange={(next) => {
-            // Merge theme onto latest canvas — never replace blocks from stale switcher props.
-            const current = specRef.current;
-            pushHistory(
-              sanitizeLandingPageDraftSpec({
-                ...current,
-                theme: next.theme,
-                themeTokens: next.themeTokens,
-                meta: {
-                  ...(current.meta || {}),
-                  ...(next.meta || {}),
-                  themePreset: next.meta?.themePreset ?? current.meta?.themePreset,
-                  themeUserLocked: true,
-                },
-              }),
-            );
-          }}
-          aiSuggestedTheme={suggestLandingPageQuickTheme({
-            category: typeof spec.meta?.category === 'string' ? spec.meta.category : undefined,
-            productService: page?.name,
-          })}
-          openRequest={sidebarOpenRequest}
-          onOpenMediaLibrary={() => setMediaOpen(true)}
-          onInsertTitlePreset={insertTitlePreset}
-          onInsertParagraphPreset={insertParagraphPreset}
-          onInsertListPreset={insertListPreset}
-          onInsertButtonPreset={insertButtonPreset}
-          onInsertButtonGroupPreset={insertButtonGroupPreset}
-          onInsertBoxPreset={insertBoxPreset}
-          onInsertFormPreset={insertFormPreset}
-          aiMenu={
-            <LandingPageAiMenu
-              placement="sidebar"
-              pageId={pageId}
-              pageName={page.name}
-              spec={spec}
-              selectedBlock={selected}
-              doctorBusy={doctorBusy}
-              disabled={saving}
-              onApplySpec={(next, note) => {
-                pushHistory(sanitizeLandingPageDraftSpec(next));
-                setSaveMsg(note);
-              }}
-              onApplyBlockFields={(blockId, patch, note) => {
-                const keys = Object.keys(patch).map((f) => `${blockId}.${f}`);
-                const current = specRef.current;
-                const next = {
-                  ...current,
-                  blocks: current.blocks.map((b) =>
-                    b.id === blockId ? ({ ...b, ...patch } as LandingPageBlock) : b,
-                  ),
-                };
-                pushHistory(markLandingPageFieldSources(next, keys, 'ai'));
-                setSaveMsg(note);
-              }}
-              onOpenSectionPresets={() => {
-                setSidebarOpenRequest({
-                  panel: 'add',
-                  tab: 'presets',
-                  nonce: Date.now(),
-                });
-              }}
-              onPageDoctor={() => void runPageDoctor()}
-            />
-          }
-        />
-      ) : null}
+      {/* Left sidebar removed — Layers / Theme / Add / AI live on right Inspector rail (+ Thành phần / Thiết kế tổng thể). */}
 
       {!fullscreenPreview ? (
       <div
         className={
-          'grid min-h-0 min-w-0 flex-1 gap-2 overflow-hidden overscroll-none max-[767px]:touch-pan-y ' +
-          (() => {
-            const right = inspectorMode === 'docked' || !inspectorDesktop;
-            if (right) return 'lg:grid-cols-[minmax(0,1fr)_240px]';
-            return 'lg:grid-cols-[minmax(0,1fr)]';
-          })()
+          // max-lg rows: canvas gets the leftover viewport (scrollport); inspector keeps 70vh.
+          // Without 1fr on the canvas row, both rows size to content → canvas never overflows
+          // and overscroll-none blocks wheel chaining — same dead-wheel symptom as desktop.
+          // Rail mode: reserve a right spacer so fixed Inspector does not cover the LP preview
+          // (editor viewport only — does not mutate freeLayout / zoom store / device viewport).
+          'grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden overscroll-none max-[767px]:touch-pan-y lg:grid-rows-[minmax(0,1fr)] ' +
+          (useInspectorRail
+            ? 'lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-x-0'
+            : 'lg:grid-cols-[minmax(0,1fr)]')
         }
         data-lp-builder-layout
         data-lp-fixed-panels="1"
         data-lp-mobile-overflow-guard="1"
         data-lp-inspector-mode={inspectorMode}
+        data-lp-inspector-dock={useInspectorRail ? (inspectorPanelOpen ? 'open' : 'rail') : undefined}
         style={{
           ['--builder-top-offset' as string]: '6.75rem',
           ['--builder-left-offset' as string]:
             'calc(var(--app-sidebar-width, 16rem) + 1.5rem)',
+          ...(useInspectorRail
+            ? {
+                ['--lp-inspector-dock-w' as string]: `${inspectorDockReservePx(
+                  inspectorPanelOpen,
+                  inspectorPanelWidthPx,
+                )}px`,
+              }
+            : null),
         }}
       >
         <LandingPageMediaModal
@@ -3855,6 +4713,27 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
           pageId={pageId}
           onClose={() => setMediaOpen(false)}
           onUse={(item) => applyMediaToSelection(item)}
+        />
+
+        <LandingPageSectionLibraryModal
+          open={sectionLibraryOpen}
+          onClose={() => {
+            setSectionLibraryOpen(false);
+            sectionLibraryPosRef.current = null;
+          }}
+          onInsertTemplate={insertLibrarySectionTemplate}
+          onInsertBlank={insertBlankSection}
+          pageTheme={spec.theme}
+          pageThemeTokens={spec.themeTokens}
+        />
+
+        <LandingPageButtonLibraryModal
+          open={buttonLibraryOpen}
+          onClose={() => {
+            setButtonLibraryOpen(false);
+            buttonLibraryPosRef.current = null;
+          }}
+          onInsertTemplate={insertLibraryButtonTemplate}
         />
 
         {textAiPopover ? (
@@ -3869,13 +4748,12 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
           />
         ) : null}
 
-        <LandingPageCanvasTextToolbarHost handlers={canvasHandlers} />
-
         <div
           ref={canvasScrollRef}
           className={
-            'min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-neutral-950/40 p-3 ' +
-            'max-[767px]:pb-14 max-[767px]:touch-pan-y ' +
+            'relative h-full min-h-0 min-w-0 max-h-full overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-neutral-950/40 p-3 ' +
+            (viewport === 'desktop' ? 'overflow-x-auto ' : 'overflow-x-hidden ') +
+            'max-[767px]:pb-24 max-[767px]:touch-pan-y ' +
             LP_THIN_SCROLL
           }
           data-lp-canvas-scroll
@@ -3886,6 +4764,9 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
           data-lp-canvas-scroll-mode="internal"
           data-lp-toolbar-anchor="1"
           style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
+          onWheel={(e) => {
+            handleCanvasZoomWheel(e);
+          }}
           onClick={(e) => {
             // Tap empty canvas chrome → deselect (blocks stopPropagation).
             if (e.target === e.currentTarget) deselectCanvas();
@@ -3900,6 +4781,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
               deselectCanvas();
             }}
           >
+            <LandingPageCanvasZoomLayer>
             <LandingPageCanvasContextMenu
               actions={{
                 pageId,
@@ -3968,8 +4850,29 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                 </LandingPageDeviceFrame>
               )}
             </LandingPageCanvasContextMenu>
+            </LandingPageCanvasZoomLayer>
           </div>
+          {/* Zoom chrome hidden — canvas zoom/scale still active via wheel + internal store. */}
         </div>
+
+        {!fullscreenPreview ? (
+          <LandingPageElementVerticalToolbar
+            enabled
+            canvasRootRef={canvasScrollRef}
+            primaryTarget={primaryTarget}
+            onSelect={(t) =>
+              selectCanvas({
+                blockId: t.blockId,
+                element: t.element,
+                field: t.field,
+              })
+            }
+            onSave={saveTargetToSavedLibrary}
+            onDuplicate={duplicateToolbarTarget}
+            onDelete={deleteToolbarTarget}
+            sectionLocked={isSectionLocked}
+          />
+        ) : null}
 
         <div
           ref={setDockedInspectorHost}
@@ -3983,15 +4886,24 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                 // 100dvh, which would assume it starts at the viewport top.
                 'relative min-h-0 min-w-0 h-[70vh] max-h-[70vh]'
               : inspectorMode === 'docked'
-                ? // Desktop docked: pure layout spacer — the real panel is portaled
-                  // to document.body and position:fixed over this reserved column,
-                  // so clicks must pass through to whatever's visually underneath.
-                  'pointer-events-none relative min-h-0 min-w-0 h-full'
+                ? // Desktop docked: layout spacer for fixed portal Inspector.
+                  // Width tracks panel open/close so canvas scrollport shrinks —
+                  // zoom layer ResizeObserver reflows preview width only (no spec).
+                  'pointer-events-none relative min-h-0 h-full shrink-0'
                 : 'hidden'
           }
           aria-hidden={!inspectorDesktop ? undefined : true}
           data-lp-inspector-slot
           data-lp-inspector-slot-mode={inspectorMode}
+          data-lp-inspector-dock-spacer={useInspectorRail ? '1' : undefined}
+          style={
+            useInspectorRail
+              ? {
+                  width: 'var(--lp-inspector-dock-w)',
+                  transition: 'width 200ms ease',
+                }
+              : undefined
+          }
         />
         {(actionBarMounted && inspectorDesktop
           ? document.body
@@ -3999,12 +4911,37 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
             ? dockedInspectorHost
             : null)
           ? createPortal(
+        <div
+          className={useInspectorRail ? 'pointer-events-auto flex flex-row-reverse items-stretch gap-2' : undefined}
+          data-lp-inspector-shell={useInspectorRail ? '1' : undefined}
+          data-lp-inspector-panel-open={useInspectorRail ? (inspectorPanelOpen ? '1' : '0') : undefined}
+          onPointerDown={useInspectorRail ? (e) => e.stopPropagation() : undefined}
+          onMouseDown={useInspectorRail ? (e) => e.stopPropagation() : undefined}
+          style={
+            useInspectorRail
+              ? {
+                  position: 'fixed',
+                  top: 'var(--builder-top-offset, 6.75rem)',
+                  right: '0.75rem',
+                  height: 'calc(100dvh - var(--builder-top-offset, 6.75rem) - 0.5rem)',
+                  maxHeight: 'calc(100dvh - var(--builder-top-offset, 6.75rem) - 0.5rem)',
+                  zIndex: 56,
+                }
+              : { display: 'contents' }
+          }
+        >
+          {useInspectorRail ? (
+            <LandingPageInspectorRail
+              active={inspectorActiveRail}
+              onSelect={handleInspectorRailSelect}
+            />
+          ) : null}
         <aside
           ref={inspectorPanelRef}
           className={
             inspectorDesktop
-              ? 'flex w-[240px] flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0A3D30] shadow-2xl'
-              : 'flex h-full max-h-full min-h-0 w-full max-w-[360px] flex-col overflow-hidden rounded-lg border border-white/10 bg-transparent'
+              ? 'flex min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0A3D30] shadow-2xl'
+              : 'flex h-full max-h-full min-h-0 w-full max-w-[360px] min-w-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-transparent'
           }
           data-lp-inspector
           data-lp-inspector-fixed="1"
@@ -4012,28 +4949,36 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
           data-lp-inspector-tab={inspectorTab}
           data-lp-inspector-canvas-first="1"
           data-lp-inspector-viewport-fit="1"
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
           style={
             inspectorDesktop
-              ? inspectorMode === 'floating'
-                ? {
-                    position: 'fixed',
-                    left: floatingPosition.x,
-                    top: floatingPosition.y,
-                    width: 240,
-                    zIndex: 60,
-                    maxHeight: `min(calc(100dvh - ${Math.max(0, floatingPosition.y)}px - 0.5rem), calc(100dvh - 0.75rem))`,
-                  }
-                : {
-                    // Docked / mặc định: fixed theo viewport — không cuộn theo canvas/main.
-                    // zIndex 56 > left toolbar portal (55) so "Thêm phần tử" không che Inspector.
-                    position: 'fixed',
-                    top: 'var(--builder-top-offset, 6.75rem)',
-                    right: '0.75rem',
-                    width: 240,
-                    height: 'calc(100dvh - var(--builder-top-offset, 6.75rem) - 0.5rem)',
-                    maxHeight: 'calc(100dvh - var(--builder-top-offset, 6.75rem) - 0.5rem)',
-                    zIndex: 56,
-                  }
+              ? useInspectorRail
+                ? inspectorPanelOpen
+                  ? {
+                      width: inspectorPanelWidthPx,
+                      height: '100%',
+                      maxHeight: '100%',
+                    }
+                  : { display: 'none' }
+                : inspectorMode === 'floating'
+                  ? {
+                      position: 'fixed',
+                      left: floatingPosition.x,
+                      top: floatingPosition.y,
+                      width: 240,
+                      zIndex: 60,
+                      maxHeight: `min(calc(100dvh - ${Math.max(0, floatingPosition.y)}px - 0.5rem), calc(100dvh - 0.75rem))`,
+                    }
+                  : {
+                      position: 'fixed',
+                      top: 'var(--builder-top-offset, 6.75rem)',
+                      right: '0.75rem',
+                      width: 240,
+                      height: 'calc(100dvh - var(--builder-top-offset, 6.75rem) - 0.5rem)',
+                      maxHeight: 'calc(100dvh - var(--builder-top-offset, 6.75rem) - 0.5rem)',
+                      zIndex: 56,
+                    }
               : {
                   height: '100%',
                   maxHeight: '100%',
@@ -4058,27 +5003,56 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
             }
             onPointerDown={onInspectorDragPointerDown}
           >
-            <div className="text-xs font-semibold uppercase opacity-60">Inspector</div>
-            <button
-              type="button"
-              data-lp-inspector-expand
-              title={
-                inspectorMode === 'docked'
-                  ? 'Phóng sidebar (floating)'
-                  : 'Gắn lại sidebar (docked)'
-              }
-              className="ml-auto hidden rounded border border-white/15 px-1.5 py-0.5 text-[10px] text-white/80 hover:bg-white/10 lg:inline-flex"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleInspectorMode();
-              }}
-            >
-              {inspectorMode === 'docked' ? 'Phóng' : 'Gắn'}
-            </button>
+            {useInspectorRail ? (
+              <>
+                <div
+                  className="min-w-0 flex-1 truncate text-sm font-semibold text-white"
+                  data-lp-inspector-title
+                  title={inspectorPanelTitle}
+                >
+                  {inspectorPanelTitle}
+                </div>
+                <button
+                  type="button"
+                  data-lp-inspector-close
+                  title="Đóng panel"
+                  aria-label="Đóng panel"
+                  className="shrink-0 rounded-md border border-white/15 px-2 py-1 text-xs text-white/80 hover:bg-white/10"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setInspectorPanelOpen(false);
+                  }}
+                >
+                  ✕
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="text-xs font-semibold uppercase opacity-60">Inspector</div>
+                <button
+                  type="button"
+                  data-lp-inspector-expand
+                  title={
+                    inspectorMode === 'docked'
+                      ? 'Phóng sidebar (floating)'
+                      : 'Gắn lại sidebar (docked)'
+                  }
+                  className="ml-auto hidden rounded border border-white/15 px-1.5 py-0.5 text-[10px] text-white/80 hover:bg-white/10 lg:inline-flex"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleInspectorMode();
+                  }}
+                >
+                  {inspectorMode === 'docked' ? 'Phóng' : 'Gắn'}
+                </button>
+              </>
+            )}
           </div>
+          {!useInspectorRail ? (
           <div className="flex gap-1 rounded-lg border border-white/10 p-0.5" data-lp-inspector-tabs>
             {(
               [
+                { id: 'add' as const, label: 'Thêm' },
                 { id: 'design' as const, label: 'Thiết kế' },
                 { id: 'content' as const, label: 'Nội dung' },
                 { id: 'advanced' as const, label: 'Nâng cao' },
@@ -4088,7 +5062,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                 key={tab.id}
                 type="button"
                 data-lp-inspector-tab-btn={tab.id}
-                className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-medium transition ${
+                className={`flex-1 rounded-md px-1.5 py-1.5 text-[10px] font-medium transition ${
                   inspectorTab === tab.id
                     ? 'bg-white/15 text-white'
                     : 'text-white/55 hover:bg-white/5 hover:text-white/80'
@@ -4099,17 +5073,226 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
               </button>
             ))}
           </div>
+          ) : null}
           </div>
 
           <div
-            className={'min-h-0 flex-1 space-y-2.5 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2 ' + LP_THIN_SCROLL}
+            className={
+              (useInspectorRail && inspectorRailSurface === 'add-components') ||
+              inspectorTab === 'add'
+                ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+                : 'min-h-0 flex-1 space-y-2.5 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2 ' +
+                  LP_THIN_SCROLL
+            }
             data-lp-inspector-scroll
+            data-lp-inspector-add-components={
+              (useInspectorRail && inspectorRailSurface === 'add-components') ||
+              inspectorTab === 'add'
+                ? '1'
+                : undefined
+            }
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
           >
 
-          {inspectorTab === 'content' ? (
+          {((useInspectorRail && inspectorRailSurface === 'add-components') ||
+            (!useInspectorRail && inspectorTab === 'add')) ? (
+            <LandingPageAddComponentsPanel
+              key={addPanelNonce}
+              initialRootMode={addPanelInitial.rootMode}
+              initialAddTab={addPanelInitial.addTab}
+              onAddBlock={addBlock}
+              onAddBlocks={addBlocks}
+              onOpenMediaLibrary={() => setMediaOpen(true)}
+              onOpenSectionLibrary={() => openSectionLibrary(null)}
+              onOpenButtonLibrary={() => openButtonLibrary(null)}
+              onInsertTitlePreset={insertTitlePreset}
+              onInsertParagraphPreset={insertParagraphPreset}
+              onInsertListPreset={insertListPreset}
+              onInsertButtonPreset={insertButtonPreset}
+              onInsertButtonGroupPreset={insertButtonGroupPreset}
+              onInsertBoxPreset={insertBoxPreset}
+              onInsertFormPreset={insertFormPreset}
+              blocks={spec.blocks}
+              selectedBlockId={selectedId}
+              onSelectBlock={(id) => {
+                selectCanvas({ blockId: id, element: 'section' });
+              }}
+              onReorderBlocks={(fromIndex, toIndex) => {
+                const moving = spec.blocks[fromIndex];
+                if (moving?.locked) {
+                  setSaveMsg('Section đang khóa — mở khóa trước khi di chuyển');
+                  return;
+                }
+                pushHistory(
+                  sanitizeLandingPageDraftSpec({
+                    ...spec,
+                    blocks: reorderBlocks(spec.blocks, fromIndex, toIndex),
+                  }),
+                );
+              }}
+              onDupBlock={dupBlock}
+              onRemoveBlock={removeBlock}
+              aiMenu={
+                <LandingPageAiMenu
+                  placement="sidebar"
+                  pageId={pageId}
+                  pageName={page.name}
+                  spec={spec}
+                  selectedBlock={selected}
+                  doctorBusy={doctorBusy}
+                  disabled={saving}
+                  onApplySpec={(next, note) => {
+                    pushHistory(sanitizeLandingPageDraftSpec(next));
+                    setSaveMsg(note);
+                  }}
+                  onApplyBlockFields={(blockId, patch, note) => {
+                    const keys = Object.keys(patch).map((f) => `${blockId}.${f}`);
+                    const current = specRef.current;
+                    const next = {
+                      ...current,
+                      blocks: current.blocks.map((b) =>
+                        b.id === blockId ? ({ ...b, ...patch } as LandingPageBlock) : b,
+                      ),
+                    };
+                    pushHistory(markLandingPageFieldSources(next, keys, 'ai'));
+                    setSaveMsg(note);
+                  }}
+                  onOpenSectionPresets={() => {
+                    openRightAddComponents({ rootMode: 'add', addTab: 'presets' });
+                  }}
+                  onPageDoctor={() => void runPageDoctor()}
+                />
+              }
+            />
+          ) : null}
+
+          {useInspectorRail && inspectorRailSurface === 'page-theme' ? (
+            <LandingPageInspectorGlobalDesign
+              spec={spec}
+              productName={page?.name}
+              onChange={(next) => {
+                const current = specRef.current;
+                pushHistory(
+                  sanitizeLandingPageDraftSpec({
+                    ...current,
+                    theme: next.theme,
+                    themeTokens: next.themeTokens,
+                    meta: {
+                      ...(current.meta || {}),
+                      ...(next.meta || {}),
+                      themePreset: next.meta?.themePreset ?? current.meta?.themePreset,
+                      themeUserLocked: true,
+                    },
+                  }),
+                );
+              }}
+            />
+          ) : null}
+
+          {isButtonInspector &&
+          selected &&
+          (!useInspectorRail ||
+            (inspectorRailSurface !== 'page-theme' &&
+              inspectorRailSurface !== 'add-components')) &&
+          (useInspectorRail || inspectorTab !== 'add') ? (
+            <LandingPageButtonInspector
+              block={selected}
+              labelField={
+                inspectorTextFieldKey(selectedElement, primaryTarget?.field) || 'ctaLabel'
+              }
+              textStyle={(() => {
+                const field =
+                  inspectorTextFieldKey(selectedElement, primaryTarget?.field) || 'ctaLabel';
+                const map =
+                  (
+                    spec.meta as
+                      | { inlineTextStyles?: Record<string, LandingPageInlineTextStyle> }
+                      | undefined
+                  )?.inlineTextStyles || {};
+                return map[`${selected.id}::${field}`] || null;
+              })()}
+              isHidden={(() => {
+                const field =
+                  inspectorTextFieldKey(selectedElement, primaryTarget?.field) || 'ctaLabel';
+                const key = elementStyleKey(selected.id, field);
+                return Boolean(
+                  (spec.meta as { elementHidden?: Record<string, boolean> } | undefined)
+                    ?.elementHidden?.[key],
+                );
+              })()}
+              isLocked={(() => {
+                const field =
+                  inspectorTextFieldKey(selectedElement, primaryTarget?.field) || 'ctaLabel';
+                if (isSectionLocked(selected.id)) return true;
+                const key = elementStyleKey(selected.id, field);
+                return Boolean(
+                  (spec.meta as { elementLocked?: Record<string, boolean> } | undefined)
+                    ?.elementLocked?.[key],
+                );
+              })()}
+              onUpdateBlock={updateBlock}
+              onPatchTextStyle={(patch) => {
+                const field =
+                  inspectorTextFieldKey(selectedElement, primaryTarget?.field) || 'ctaLabel';
+                canvasActionRef.current.patchInlineTextStyle(selected.id, field, patch);
+              }}
+              onLiveLabel={(value) => {
+                const field =
+                  inspectorTextFieldKey(selectedElement, primaryTarget?.field) || 'ctaLabel';
+                canvasActionRef.current.updateBlockFieldLive(selected.id, field, value);
+              }}
+              onCommitLabel={(value) => {
+                const field =
+                  inspectorTextFieldKey(selectedElement, primaryTarget?.field) || 'ctaLabel';
+                canvasActionRef.current.updateBlockFieldCommit(selected.id, field, value);
+              }}
+              onToggleHidden={() => {
+                const field =
+                  inspectorTextFieldKey(selectedElement, primaryTarget?.field) || 'ctaLabel';
+                canvasActionRef.current.toggleElementHidden(selected.id, field);
+              }}
+              onToggleLock={() => {
+                const field =
+                  inspectorTextFieldKey(selectedElement, primaryTarget?.field) || 'ctaLabel';
+                canvasActionRef.current.toggleElementLock(selected.id, field);
+              }}
+            />
+          ) : null}
+
+          {isIconInspector &&
+          selected &&
+          (!useInspectorRail ||
+            (inspectorRailSurface !== 'page-theme' &&
+              inspectorRailSurface !== 'add-components')) &&
+          (useInspectorRail || inspectorTab !== 'add') ? (
+            <LandingPageIconInspector
+              block={selected}
+              elementKey={
+                typeof selectedElement === 'string' &&
+                selectedElement.startsWith('item:trust-icon-')
+                  ? selectedElement
+                  : typeof primaryTarget?.field === 'string' &&
+                      primaryTarget.field.startsWith('item:trust-icon-')
+                    ? primaryTarget.field
+                    : typeof primaryTarget?.element === 'string' &&
+                        primaryTarget.element.startsWith('item:trust-icon-')
+                      ? primaryTarget.element
+                      : null
+              }
+              onUpdateBlock={updateBlock}
+            />
+          ) : null}
+
+          {!isButtonInspector &&
+          !isIconInspector &&
+          (!useInspectorRail ||
+            (inspectorRailSurface !== 'page-theme' &&
+              inspectorRailSurface !== 'add-components')) &&
+          inspectorTab === 'content' ? (
           <div className="space-y-3" data-lp-inspector-content data-lp-canvas-first="1" data-lp-context-aware="1">
           {(() => {
-            const ctx = resolveInspectorContext(selected, selectedElement);
+            const ctx = resolveInspectorContext(selected, selectedElement, primaryTarget?.field);
             const el = selectedElement;
             const isItemEl = typeof el === 'string' && el.startsWith('item:');
             return (
@@ -4124,26 +5307,145 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
               data-lp-content-focus={ctx.dataAttr}
               data-lp-context={ctx.dataAttr}
             >
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-medium">{ctx.label}</div>
-                {ctx.kind === 'section' || ctx.kind === 'form' || ctx.kind === 'video' || ctx.kind === 'countdown' ? (
-                  <label className="flex items-center gap-1.5 text-[11px] opacity-80">
-                    <input
-                      type="checkbox"
-                      checked={selected.enabled}
-                      onChange={(e) => updateBlock(selected.id, { enabled: e.target.checked })}
-                    />
-                    Hiện
-                  </label>
-                ) : null}
-              </div>
-
-              {ctx.kind === 'text' || isItemEl ? (
-                <InspectorEmptyHint>
-                  Double-click chữ trên canvas để sửa Heading / Paragraph.
-                  Typography &amp; Color nằm tab <strong>Thiết kế</strong>.
-                </InspectorEmptyHint>
+              {!useInspectorRail ? (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-medium">{ctx.label}</div>
+                  {ctx.kind === 'section' ||
+                  ctx.kind === 'form' ||
+                  ctx.kind === 'video' ||
+                  ctx.kind === 'countdown' ? (
+                    <label className="flex items-center gap-1.5 text-[11px] opacity-80">
+                      <input
+                        type="checkbox"
+                        checked={selected.enabled}
+                        onChange={(e) => updateBlock(selected.id, { enabled: e.target.checked })}
+                      />
+                      Hiện
+                    </label>
+                  ) : null}
+                </div>
               ) : null}
+
+              <LandingPageInspectorElementActions
+                hideVisibilityControls={useInspectorRail}
+                contextKind={ctx.kind}
+                sectionLocked={isSectionLocked(selected.id)}
+                allowSectionReorder={
+                  ctx.kind === 'section' || ctx.kind === 'form' || ctx.kind === 'video' || ctx.kind === 'countdown'
+                }
+                canReplaceImage={(() => {
+                  const b = selected;
+                  if ('imageUrl' in b) return true;
+                  if (b.type === 'Gallery' || b.type === 'Product' || b.type === 'Hero') return true;
+                  if (b.type === 'CTA' && isLandingPageBoxStyle(b.style as Record<string, unknown> | undefined)) {
+                    return true;
+                  }
+                  return false;
+                })()}
+                isTextHidden={(() => {
+                  const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
+                  if (!field) return false;
+                  const key = elementStyleKey(selected.id, field);
+                  return Boolean(
+                    (spec.meta as { elementHidden?: Record<string, boolean> } | undefined)?.elementHidden?.[
+                      key
+                    ],
+                  );
+                })()}
+                isTextLocked={(() => {
+                  const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
+                  if (!field) return false;
+                  if (isSectionLocked(selected.id)) return true;
+                  const key = elementStyleKey(selected.id, field);
+                  return Boolean(
+                    (spec.meta as { elementLocked?: Record<string, boolean> } | undefined)?.elementLocked?.[
+                      key
+                    ],
+                  );
+                })()}
+                onMoveUp={() => canvasActionRef.current.moveBlock(selected.id, 'up')}
+                onMoveDown={() => canvasActionRef.current.moveBlock(selected.id, 'down')}
+                onDuplicate={() => {
+                  const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
+                  const itemM =
+                    field &&
+                    /^(?:itemTitle|itemDesc|itemQuestion|itemAnswer|itemQuote|itemAuthor|planName|planPrice|planCta|fieldLabel):(.+)$/.exec(
+                      field,
+                    );
+                  if (itemM?.[1]) {
+                    canvasActionRef.current.dupItem(selected.id, itemM[1]);
+                    return;
+                  }
+                  const el = selectedElement;
+                  const prefer =
+                    el === 'headline' ||
+                    el === 'subheadline' ||
+                    el === 'body' ||
+                    el === 'cta' ||
+                    (typeof el === 'string' && el.startsWith('item:'))
+                      ? el
+                      : undefined;
+                  canvasActionRef.current.dupBlock(selected.id, prefer);
+                }}
+                onDelete={() => canvasActionRef.current.removeBlock(selected.id)}
+                onAi={
+                  ctx.kind === 'section' || ctx.kind === 'form'
+                    ? () => canvasActionRef.current.focusInspectorAi(selected.id)
+                    : undefined
+                }
+                onReplaceImage={() => canvasActionRef.current.triggerReplaceImage(selected.id)}
+                onCopy={() => canvasActionRef.current.copyBlockToClipboard(selected.id)}
+                onCopyStyle={() => canvasActionRef.current.copyStyleToClipboard(selected.id)}
+                onSaveAsset={() => {
+                  const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
+                  if (field) canvasActionRef.current.saveTextAsset(selected.id, field);
+                }}
+                onSyncFromMobile={() => {
+                  const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
+                  if (field) canvasActionRef.current.syncDesignFromMobile(selected.id, field);
+                }}
+                onToggleHidden={() => {
+                  const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
+                  if (field) canvasActionRef.current.toggleElementHidden(selected.id, field);
+                }}
+                onToggleLock={() => {
+                  const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
+                  if (field) canvasActionRef.current.toggleElementLock(selected.id, field);
+                }}
+                onAiPrompt={() => {
+                  const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
+                  if (!field) return;
+                  const rect =
+                    inspectorPanelRef.current?.getBoundingClientRect() ?? new DOMRect(0, 0, 320, 48);
+                  canvasActionRef.current.openTextAiPrompt(selected.id, field, rect);
+                }}
+              />
+
+              {(() => {
+                const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
+                if ((ctx.kind === 'text' || ctx.kind === 'button') && field) {
+                  return (
+                    <LandingPageInspectorTextContent
+                      block={selected}
+                      field={field}
+                      onLive={(value) =>
+                        canvasActionRef.current.updateBlockFieldLive(selected.id, field, value)
+                      }
+                      onCommit={(value) =>
+                        canvasActionRef.current.updateBlockFieldCommit(selected.id, field, value)
+                      }
+                    />
+                  );
+                }
+                if (ctx.kind === 'text' || isItemEl) {
+                  return (
+                    <InspectorEmptyHint>
+                      Chọn một vùng chữ trên canvas. Tab <strong>Thiết kế</strong> cho typography.
+                    </InspectorEmptyHint>
+                  );
+                }
+                return null;
+              })()}
 
               {ctx.kind === 'section' && selected.type === 'Hero' ? (
                 // Single column always: `sm:` is a viewport breakpoint, but this
@@ -4186,25 +5488,14 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                 </div>
               ) : null}
 
-              {ctx.kind === 'section' && !['Hero', 'Video', 'Countdown', 'LeadForm'].includes(selected.type) ? (
+              {ctx.kind === 'section' &&
+              !['Hero', 'Video', 'Countdown', 'LeadForm', 'Pricing', 'FAQ', 'Benefits', 'Features', 'Testimonials', 'Process', 'Gallery', 'Product', 'Speaker'].includes(
+                selected.type,
+              ) ? (
                 <InspectorEmptyHint>
-                  Double-click chữ trên canvas. Background / Size / Spacing: tab <strong>Thiết kế</strong>.
+                  Double-click chữ trên canvas. Nền / kích thước / khoảng cách: tab{' '}
+                  <strong>Thiết kế</strong>.
                 </InspectorEmptyHint>
-              ) : null}
-
-              {ctx.kind === 'button' && 'ctaUrl' in selected ? (
-                <div className="space-y-1.5 rounded-lg border border-white/10 p-2" data-lp-inspector-button-link>
-                  <div className="text-[10px] font-semibold uppercase opacity-60">Link / Action</div>
-                  <Label className="text-xs">URL</Label>
-                  <Input
-                    value={(selected as { ctaUrl?: string }).ctaUrl || ''}
-                    onChange={(e) =>
-                      updateBlock(selected.id, { ctaUrl: e.target.value } as Partial<LandingPageBlock>)
-                    }
-                    placeholder="#lead-form hoặc https://"
-                  />
-                  <p className="text-[10px] opacity-40">Nhãn nút: double-click trên canvas.</p>
-                </div>
               ) : null}
 
               {ctx.kind === 'image' && !isItemEl && 'imageUrl' in selected ? (
@@ -4252,25 +5543,35 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
               ) : null}
 
               {ctx.kind === 'form' ? (
-                <div className="space-y-2 rounded border border-white/10 p-2" data-lp-inspector-crm>
-                  <LeadFormCrmInspector
+                <div className="space-y-2" data-lp-inspector-form>
+                  <LandingPageLeadFormFieldsInspector
                     block={selected as import('@marketingspa/shared').LandingPageLeadFormBlock}
-                    onChange={(crm) =>
+                    onChange={(fields) =>
                       updateBlock(selected.id, {
-                        crm,
+                        fields,
                       } as Partial<LandingPageBlock>)
                     }
                   />
+                  <div className="rounded border border-white/10 p-2" data-lp-inspector-crm>
+                    <LeadFormCrmInspector
+                      block={selected as import('@marketingspa/shared').LandingPageLeadFormBlock}
+                      onChange={(crm) =>
+                        updateBlock(selected.id, {
+                          crm,
+                        } as Partial<LandingPageBlock>)
+                      }
+                    />
+                  </div>
                   <p className="text-[10px] opacity-40">
-                    Label / placeholder: double-click trên canvas.
+                    Nhãn / placeholder cũng có thể sửa bằng double-click trên canvas.
                   </p>
                 </div>
               ) : null}
 
               {ctx.kind === 'countdown' && selected.type === 'Countdown' ? (
                 <div className="space-y-2 rounded border border-white/10 p-2" data-lp-countdown-inspector>
-                  <div className="text-[10px] font-semibold uppercase opacity-60">Countdown Timer</div>
-                  <Label className="text-xs">Ends at</Label>
+                  <div className="text-[10px] font-semibold uppercase opacity-60">Đồng hồ đếm ngược</div>
+                  <Label className="text-xs">Kết thúc lúc</Label>
                   <Input
                     type="datetime-local"
                     value={(() => {
@@ -4289,7 +5590,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                       } as Partial<LandingPageBlock>);
                     }}
                   />
-                  <Label className="text-xs">Timezone</Label>
+                  <Label className="text-xs">Múi giờ</Label>
                   <Input
                     value={(selected as { timezone?: string }).timezone || 'Asia/Ho_Chi_Minh'}
                     onChange={(e) =>
@@ -4319,7 +5620,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                       </label>
                     ))}
                   </div>
-                  <Label className="text-xs">Style</Label>
+                  <Label className="text-xs">Kiểu hiển thị</Label>
                   <select
                     className="lp-dark-select w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-sm text-white"
                     value={(selected as { styleVariant?: string }).styleVariant || 'boxes'}
@@ -4329,9 +5630,9 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                       } as Partial<LandingPageBlock>)
                     }
                   >
-                    <option value="boxes">boxes</option>
-                    <option value="inline">inline</option>
-                    <option value="minimal">minimal</option>
+                    <option value="boxes">Ô số</option>
+                    <option value="inline">Nằm ngang</option>
+                    <option value="minimal">Tối giản</option>
                   </select>
                   <Label className="text-xs">Khi hết giờ</Label>
                   <select
@@ -4346,9 +5647,9 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                     <option value="zero">Về 0</option>
                     <option value="hide">Ẩn</option>
                     <option value="message">Hiện thông báo</option>
-                    <option value="cta">Hiện CTA</option>
+                    <option value="cta">Hiện nút CTA</option>
                   </select>
-                  <Label className="text-xs">Expire CTA URL</Label>
+                  <Label className="text-xs">URL CTA khi hết giờ</Label>
                   <Input
                     value={(selected as { expireCtaUrl?: string }).expireCtaUrl || ''}
                     onChange={(e) =>
@@ -4373,6 +5674,36 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                   />
                 </div>
               ) : null}
+
+              {ctx.kind === 'section' && selected.type === 'Pricing' && 'plans' in selected ? (
+                <div className="space-y-2 rounded border border-white/10 p-2" data-lp-pricing-inspector>
+                  <div className="text-[10px] font-semibold uppercase opacity-60">Gói giá</div>
+                  <p className="text-[10px] opacity-45">
+                    Double-click tên / giá / nút trên canvas. Dùng tab Thiết kế cho nền &amp; khoảng
+                    cách.
+                  </p>
+                  {((selected as { plans?: Array<{ id: string; name?: string }> }).plans || []).map(
+                    (plan, i) => (
+                      <div
+                        key={plan.id}
+                        className="rounded border border-white/5 px-2 py-1.5 text-[11px] text-white/70"
+                      >
+                        Gói {i + 1}: {plan.name || '(chưa đặt tên)'}
+                      </div>
+                    ),
+                  )}
+                </div>
+              ) : null}
+
+              {ctx.kind === 'section' &&
+              ['FAQ', 'Benefits', 'Features', 'Testimonials', 'Process', 'Gallery', 'Product', 'Speaker'].includes(
+                selected.type,
+              ) ? (
+                <InspectorEmptyHint>
+                  Double-click tiêu đề / mô tả / thẻ trên canvas. Nền &amp; khoảng cách: tab{' '}
+                  <strong>Thiết kế</strong>.
+                </InspectorEmptyHint>
+              ) : null}
             </div>
           )}
               </>
@@ -4381,10 +5712,23 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
           </div>
           ) : null}
 
-          {inspectorTab === 'design' ? (
+          {!isButtonInspector &&
+          !isIconInspector &&
+          (!useInspectorRail ||
+            (inspectorRailSurface !== 'page-theme' &&
+              inspectorRailSurface !== 'add-components')) &&
+          inspectorTab === 'design' ? (
             <LandingPageInspectorDesignTab
               selected={selected}
               selectedElement={selectedElement}
+              viewport={viewport}
+              resolvedFreeLayout={resolvedSelectedFreeLayout}
+              onPatchFreeLayout={
+                selected
+                  ? (layout) => patchBlockFreeLayoutForViewport(selected.id, layout)
+                  : undefined
+              }
+              textField={inspectorTextFieldKey(selectedElement, primaryTarget?.field)}
               textStyle={(() => {
                 const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
                 if (!selected || !field) return null;
@@ -4422,43 +5766,103 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                 selectCanvas({ blockId: selected.id, element: 'section-background' });
                 setMediaOpen(true);
               }}
+              hidePageTheme={useInspectorRail}
+              hideElementCustomCss={useInspectorRail}
             />
           ) : null}
 
-          {inspectorTab === 'advanced' ? (
+          {!isButtonInspector &&
+          !isIconInspector &&
+          (!useInspectorRail ||
+            (inspectorRailSurface !== 'page-theme' &&
+              inspectorRailSurface !== 'add-components')) &&
+          inspectorTab === 'advanced' ? (
             <div className="space-y-2" data-lp-inspector-advanced data-lp-advanced-accordions="1">
+              {selected && useInspectorRail ? (
+                <InspectorAccordion title="Khóa &amp; hiển thị" data-lp="advanced-visibility" defaultOpen>
+                  <div className="space-y-2" data-lp-inspector-visibility-controls>
+                    {(() => {
+                      const ctx = resolveInspectorContext(
+                        selected,
+                        selectedElement,
+                        primaryTarget?.field,
+                      );
+                      const field = inspectorTextFieldKey(selectedElement, primaryTarget?.field);
+                      const hiddenKey = field ? elementStyleKey(selected.id, field) : null;
+                      const isTextHidden =
+                        hiddenKey &&
+                        Boolean(
+                          (spec.meta as { elementHidden?: Record<string, boolean> } | undefined)
+                            ?.elementHidden?.[hiddenKey],
+                        );
+                      const isTextLocked =
+                        hiddenKey &&
+                        (isSectionLocked(selected.id) ||
+                          Boolean(
+                            (spec.meta as { elementLocked?: Record<string, boolean> } | undefined)
+                              ?.elementLocked?.[hiddenKey],
+                          ));
+                      return (
+                        <>
+                          {ctx.kind === 'section' ||
+                          ctx.kind === 'form' ||
+                          ctx.kind === 'video' ||
+                          ctx.kind === 'countdown' ? (
+                            <label className="flex items-center gap-2 text-xs">
+                              <input
+                                type="checkbox"
+                                checked={selected.enabled}
+                                onChange={(e) =>
+                                  updateBlock(selected.id, { enabled: e.target.checked })
+                                }
+                              />
+                              Hiện section trên canvas
+                            </label>
+                          ) : null}
+                          {field ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              <button
+                                type="button"
+                                className="rounded border border-white/10 px-2 py-1 text-[11px] hover:bg-white/5"
+                                onClick={() =>
+                                  canvasActionRef.current.toggleElementHidden(selected.id, field)
+                                }
+                              >
+                                {isTextHidden ? 'Hiện phần tử' : 'Ẩn phần tử'}
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded border border-white/10 px-2 py-1 text-[11px] hover:bg-white/5"
+                                onClick={() =>
+                                  canvasActionRef.current.toggleElementLock(selected.id, field)
+                                }
+                              >
+                                {isTextLocked ? 'Mở khóa' : 'Khóa chỉnh sửa'}
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="text-[10px] opacity-40">
+                              Chọn text / button trên canvas để ẩn hoặc khóa phần tử.
+                            </p>
+                          )}
+                          {selected.locked ? (
+                            <p className="text-[10px] text-amber-200/80">
+                              Section đang khóa — mở khóa trên canvas hoặc context menu.
+                            </p>
+                          ) : null}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </InspectorAccordion>
+              ) : null}
               <InspectorAccordion title="Responsive" data-lp="advanced-responsive" defaultOpen={false}>
-                <p className="text-[11px] leading-snug opacity-60">
-                  Viewport hiện tại: <strong className="text-white/80">{viewport}</strong>. Đổi Desktop /
-                  Tablet / Mobile trên toolbar — canvas &amp; free-layout theo từng breakpoint.
-                </p>
                 {selected ? (
-                  <label className="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={
-                        ((selected.responsiveStyle as { mobile?: { display?: string } } | undefined)?.mobile
-                          ?.display === 'none')
-                      }
-                      onChange={(e) => {
-                        const prev = {
-                          ...((selected.responsiveStyle || {}) as Record<string, unknown>),
-                        };
-                        const mobile = {
-                          ...((prev.mobile as Record<string, unknown>) || {}),
-                        };
-                        if (e.target.checked) mobile.display = 'none';
-                        else delete mobile.display;
-                        updateBlock(selected.id, {
-                          responsiveStyle: {
-                            ...prev,
-                            mobile: Object.keys(mobile).length ? mobile : undefined,
-                          },
-                        } as Partial<LandingPageBlock>);
-                      }}
-                    />
-                    Ẩn section trên Mobile
-                  </label>
+                  <LandingPageInspectorResponsiveVisibility
+                    block={selected}
+                    activeViewport={viewport}
+                    onUpdateBlock={updateBlock}
+                  />
                 ) : (
                   <p className="text-[10px] opacity-40">Chọn section để chỉnh responsive riêng.</p>
                 )}
@@ -4467,6 +5871,10 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
               <InspectorAccordion title="Vị trí nâng cao" data-lp="advanced-position" defaultOpen={false}>
                 {selected ? (
                   <div className="space-y-2" data-lp-advanced-free-layout>
+                    <p className="text-[10px] opacity-50">
+                      Viewport: <strong className="text-white/75">{viewport}</strong> — toạ độ/rotate lưu theo
+                      breakpoint đang xem.
+                    </p>
                     {selected.locked ? (
                       <p className="text-[10px] text-amber-200/80" data-lp-section-locked-hint>
                         Section đang khóa — mở khóa để chỉnh vị trí.
@@ -4502,7 +5910,8 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                       />
                       Free position (kéo tự do)
                     </label>
-                    {selected.positionMode === 'free' && selected.freeLayout ? (
+                    {selected.positionMode === 'free' && resolvedSelectedFreeLayout ? (
+                      <>
                       <div className="grid grid-cols-2 gap-2">
                         {(
                           [
@@ -4520,27 +5929,46 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                               className="h-8 text-xs"
                               disabled={selected.locked === true}
                               value={
-                                typeof selected.freeLayout?.[key] === 'number'
-                                  ? selected.freeLayout[key]
+                                typeof resolvedSelectedFreeLayout[key] === 'number'
+                                  ? resolvedSelectedFreeLayout[key]
                                   : ''
                               }
                               onChange={(e) => {
                                 if (selected.locked) return;
                                 const n =
                                   e.target.value === '' ? undefined : Number(e.target.value);
+                                const base =
+                                  resolvedSelectedFreeLayout ||
+                                  ({ x: 0, y: 0 } as LandingPageFreeLayout);
                                 const nextLayout = patchAbsoluteFreeLayoutField(
-                                  selected.freeLayout!,
+                                  base,
                                   key,
                                   Number.isFinite(n as number) ? (n as number) : undefined,
                                 );
-                                updateBlock(selected.id, {
-                                  freeLayout: nextLayout,
-                                } as Partial<LandingPageBlock>);
+                                patchBlockFreeLayoutForViewport(selected.id, nextLayout);
                               }}
                             />
                           </label>
                         ))}
                       </div>
+                      <button
+                        type="button"
+                        className="w-full rounded border border-white/15 px-2 py-1.5 text-[11px] hover:bg-white/5"
+                        data-lp-reset-rotate
+                        disabled={selected.locked === true}
+                        onClick={() => {
+                          if (selected.locked) return;
+                          const base =
+                            resolvedSelectedFreeLayout || ({ x: 0, y: 0 } as LandingPageFreeLayout);
+                          patchBlockFreeLayoutForViewport(
+                            selected.id,
+                            patchAbsoluteFreeLayoutField(base, 'rotate', undefined),
+                          );
+                        }}
+                      >
+                        Reset góc xoay (0°)
+                      </button>
+                      </>
                     ) : (
                       <p className="text-[10px] opacity-40">
                         Bật Free hoặc kéo trên canvas để ghi toạ độ. Trang cũ giữ flow.
@@ -4556,7 +5984,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                 <div className="space-y-2" data-lp-inspector-seo>
                   <LandingPageInlineAiField
                     pageId={pageId}
-                    label="SEO title"
+                    label="Tiêu đề SEO"
                     fieldKind="seo.title"
                     blockType="SEO"
                     requestKey={`${pageId}.seo.title`}
@@ -4573,7 +6001,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                   />
                   <LandingPageInlineAiField
                     pageId={pageId}
-                    label="Meta description"
+                    label="Mô tả meta"
                     fieldKind="seo.metaDescription"
                     blockType="SEO"
                     requestKey={`${pageId}.seo.metaDescription`}
@@ -4590,7 +6018,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                     }
                     onApplyAi={(v) => applyAiToSeo('metaDescription', v)}
                   />
-                  <Label className="text-xs">Canonical</Label>
+                  <Label className="text-xs">URL chuẩn (canonical)</Label>
                   <Input
                     value={spec.seo.canonical || ''}
                     onChange={(e) =>
@@ -4611,7 +6039,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                         })
                       }
                     />
-                    robots index
+                    Cho phép index (robots)
                   </label>
                 </div>
               </InspectorAccordion>
@@ -4682,7 +6110,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                 </div>
               </InspectorAccordion>
 
-              <InspectorAccordion title="Versions/Preview" data-lp="advanced-versions" defaultOpen={false}>
+              <InspectorAccordion title="Phiên bản / Xem trước" data-lp="advanced-versions" defaultOpen={false}>
                 <div className="space-y-2" data-lp-inspector-versions>
                   <LandingPageVersionHistoryPanel
                     pageId={pageId}
@@ -4712,7 +6140,7 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
                 </div>
               </InspectorAccordion>
 
-              <InspectorAccordion title="Custom Class/CSS" data-lp="advanced-custom-css" defaultOpen={false}>
+              <InspectorAccordion title="Class / CSS tùy chỉnh" data-lp="advanced-custom-css" defaultOpen={false}>
                 {selected ? (
                   <CustomCssPanel
                     blockId={selected.id}
@@ -4740,7 +6168,8 @@ export function LandingPageBuilder({ pageId }: { pageId: string }) {
             </a>
           ) : null}
           </div>
-        </aside>,
+        </aside>
+        </div>,
             actionBarMounted && inspectorDesktop
               ? document.body
               : (dockedInspectorHost as HTMLElement),

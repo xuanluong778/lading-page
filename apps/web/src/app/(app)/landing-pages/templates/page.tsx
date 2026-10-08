@@ -2,10 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Check, ChevronDown } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { apiClient } from '@/lib/api-client';
 import { useT } from '@/i18n/i18n-provider';
 import { Button } from '@/components/ui/button';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import {
   TemplateImacPreviewFrame,
   TemplateImacPreviewSkeleton,
@@ -17,6 +24,7 @@ import {
   LANDING_PAGE_CATEGORIES,
   LANDING_PAGE_TEMPLATE_CATALOG_VERSION,
 } from '@marketingspa/shared';
+import { cn } from '@/lib/utils';
 
 type TemplateBadge = 'new' | 'popular' | 'high_conversion';
 
@@ -124,6 +132,7 @@ export default function LandingPagesTemplatesPage() {
   const [viewport, setViewport] = useState<TemplateViewport>('desktop');
   const [using, setUsing] = useState(false);
   const [page, setPage] = useState(1);
+  const [categorySheetOpen, setCategorySheetOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -177,47 +186,126 @@ export default function LandingPagesTemplatesPage() {
     return LANDING_PAGE_CATEGORIES.filter((c) => present.has(c));
   }, [items]);
 
+  const categoryLabel = category || 'Tất cả';
+  const categoryCount = LANDING_PAGE_CATEGORIES.length;
+
+  const selectCategory = useCallback((next: string) => {
+    setCategory(next);
+    setCategorySheetOpen(false);
+  }, []);
+
   const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
   const pageItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const previewMeta = items.find((i) => i.slug === previewSlug);
 
   return (
-    <div>
+    <div className="min-w-0 w-full max-w-full">
       <PageHeader
         title={t('landingPages.templates')}
         description="Chọn mẫu theo ngành — hover xem nhanh, Xem trước full màn hình như builder."
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2" data-lp-template-search>
+      <div className="mb-3 flex w-full min-w-0 flex-col gap-2 lg:mb-4 lg:flex-row lg:flex-wrap lg:items-center" data-lp-template-search>
         <input
           type="search"
           value={searchDraft}
           placeholder="Tìm mẫu theo tên, mô tả, tag…"
-          className="min-w-[200px] flex-1 rounded-md border border-white/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-[#F97316]/60"
+          className="w-full min-w-0 flex-1 rounded-md border border-white/15 bg-transparent px-3 py-2.5 text-sm outline-none focus:border-[#F97316]/60 lg:min-w-[200px] lg:py-2"
           onChange={(e) => setSearchDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') setSearch(searchDraft.trim());
           }}
         />
-        <Button size="sm" variant="outline" onClick={() => setSearch(searchDraft.trim())}>
-          Tìm
-        </Button>
-        {search || category ? (
+        <div className="flex shrink-0 gap-2">
           <Button
             size="sm"
-            variant="ghost"
-            onClick={() => {
-              setSearch('');
-              setSearchDraft('');
-              setCategory('');
-            }}
+            variant="outline"
+            className="min-h-11 flex-1 lg:min-h-8 lg:flex-none"
+            onClick={() => setSearch(searchDraft.trim())}
           >
-            Xóa lọc
+            Tìm
           </Button>
-        ) : null}
+          {search || category ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="min-h-11 lg:min-h-8"
+              onClick={() => {
+                setSearch('');
+                setSearchDraft('');
+                setCategory('');
+              }}
+            >
+              Xóa lọc
+            </Button>
+          ) : null}
+        </div>
       </div>
 
-      <div className="mb-5 flex flex-wrap gap-2" data-lp-template-categories>
+      {/* Mobile: single category trigger → bottom sheet */}
+      <div className="mb-4 lg:hidden" data-lp-template-categories-mobile>
+        <Button
+          type="button"
+          variant="outline"
+          className="flex h-11 min-h-11 w-full min-w-0 items-center justify-between gap-2 px-3 text-left text-sm font-medium"
+          onClick={() => setCategorySheetOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={categorySheetOpen}
+        >
+          <span className="min-w-0 truncate">
+            Danh mục: <span className="text-[#F97316]">{categoryLabel}</span>
+          </span>
+          <ChevronDown className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+        </Button>
+      </div>
+
+      <Sheet open={categorySheetOpen} onOpenChange={setCategorySheetOpen}>
+        <SheetContent
+          side="bottom"
+          className="flex max-h-[min(85vh,36rem)] flex-col gap-0 overflow-hidden rounded-t-2xl border-white/10 bg-[#0A3D30] p-0 text-white lg:hidden"
+        >
+          <SheetHeader className="shrink-0 border-b border-white/10 px-4 pb-3 pt-4 text-left">
+            <SheetTitle className="text-base text-white">Chọn danh mục</SheetTitle>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2">
+            <button
+              type="button"
+              className={cn(
+                'flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors',
+                category === ''
+                  ? 'bg-[#F97316]/20 font-semibold text-[#F97316] ring-1 ring-[#F97316]/50'
+                  : 'text-white/90 hover:bg-white/10',
+              )}
+              onClick={() => selectCategory('')}
+            >
+              <span>Tất cả</span>
+              {category === '' ? <Check className="h-4 w-4 shrink-0" aria-hidden /> : null}
+            </button>
+            {LANDING_PAGE_CATEGORIES.map((c) => {
+              const selected = category === c;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  className={cn(
+                    'flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors',
+                    selected
+                      ? 'bg-[#F97316]/20 font-semibold text-[#F97316] ring-1 ring-[#F97316]/50'
+                      : 'text-white/90 hover:bg-white/10',
+                  )}
+                  onClick={() => selectCategory(c)}
+                >
+                  <span className="min-w-0 truncate">{c}</span>
+                  {selected ? <Check className="h-4 w-4 shrink-0" aria-hidden /> : null}
+                </button>
+              );
+            })}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Desktop: chip row unchanged */}
+      <div className="mb-5 hidden flex-wrap gap-2 lg:flex" data-lp-template-categories>
         <Button size="sm" variant={category === '' ? 'default' : 'outline'} onClick={() => setCategory('')}>
           Tất cả
         </Button>
@@ -236,7 +324,8 @@ export default function LandingPagesTemplatesPage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs opacity-60">
         <span>
           {loading ? 'Đang tải…' : `${items.length} mẫu`}
-          {category ? ` · ${category}` : ' · mọi category'}
+          {` · ${categoryCount} category`}
+          {category ? ` · ${category}` : ''}
         </span>
         <span className="hidden sm:inline">
           {hoverOk ? 'Rê chuột vào ảnh để xem toàn trang' : 'Chạm Xem trước để xem đầy đủ trên mobile'}

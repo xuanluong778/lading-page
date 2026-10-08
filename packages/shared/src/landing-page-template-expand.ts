@@ -29,7 +29,7 @@ import { resolveFashionPremiumStandard } from './landing-page-fashion-gold-syste
 import { resolveCosmeticsPremiumStandard } from './landing-page-cosmetics-gold-system';
 import { applySectionShells } from './landing-page-section-shells';
 
-export const LANDING_PAGE_TEMPLATE_CATALOG_VERSION = 'gallery-v23-production-saas-axis';
+export const LANDING_PAGE_TEMPLATE_CATALOG_VERSION = 'gallery-v24-premium-diversity';
 
 function slugFor(seedSlug: string, flowSlugSuffix: string, variantIndex = 0): string {
   if (variantIndex === 0 || !flowSlugSuffix) return seedSlug;

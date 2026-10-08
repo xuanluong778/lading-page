@@ -34,7 +34,6 @@ const RESERVED_LP_SLUGS = new Set([
 /**
  * Chỉ rewrite subdomain landing (slug.marketingautoaz.com).
  * Apex, www, localhost và mọi host khác giữ routing hiện tại.
- * Không import shared barrel — tránh kéo Node API vào middleware.
  */
 function shouldRouteLandingPageHost(hostname: string, pathname: string): boolean {
   if (
@@ -56,10 +55,21 @@ function shouldRouteLandingPageHost(hostname: string, pathname: string): boolean
 
 /** Lưu ?ref=CODE cookie 30 ngày (HttpOnly + JS mirror) — SameSite=Lax, Secure trên HTTPS */
 export function middleware(request: NextRequest) {
-  const hostname = request.nextUrl.hostname;
+  // Next binds 127.0.0.1, so nextUrl.hostname is not the public host.
+  // Prefer the incoming Host header; apex/www stay in APP_HOSTS.
+  const forwarded = request.headers.get('x-forwarded-host');
+  const hostname =
+    (forwarded ? forwarded.split(',')[0] : null) ||
+    request.headers.get('host') ||
+    request.nextUrl.hostname;
   if (shouldRouteLandingPageHost(hostname, request.nextUrl.pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = '/lp-host';
+    // App listens HTTP behind TLS. Keep the public Host, but do not
+    // internally fetch https://localhost:3002.
+    if (request.headers.get('x-forwarded-proto') === 'https') {
+      url.protocol = 'http:';
+    }
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('x-lp-host', hostname);
     return NextResponse.rewrite(url, { request: { headers: requestHeaders } });

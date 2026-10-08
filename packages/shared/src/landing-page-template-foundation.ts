@@ -71,8 +71,25 @@ export const LANDING_PAGE_HERO_VARIANTS = [
   'fullscreen-image',
   'minimal-copy',
   'floating-card',
+  /** PHASE 2 premium compositions — industry × architecture diversity */
+  'asymmetric',
+  'image-collage',
+  'product-screenshot',
+  'layered-cards',
+  'dark-cinematic',
+  'gradient-mesh',
+  'conversion-proof',
 ] as const;
 export type LandingPageHeroVariant = (typeof LANDING_PAGE_HERO_VARIANTS)[number];
+
+/** Wireframe / low-diversity heroes — DNA cycle may replace these. */
+export const LANDING_PAGE_HERO_WIREFRAME = new Set<string>([
+  'default',
+  'centered',
+  'minimal-copy',
+  'minimal',
+  'countdown',
+]);
 
 export const LANDING_PAGE_CTA_VARIANTS = [
   'default',
@@ -267,7 +284,14 @@ export type LegacyArchitectureHeroVariant =
   | 'split-left'
   | 'split-right'
   | 'minimal-copy'
-  | 'floating-card';
+  | 'floating-card'
+  | 'asymmetric'
+  | 'image-collage'
+  | 'product-screenshot'
+  | 'layered-cards'
+  | 'dark-cinematic'
+  | 'gradient-mesh'
+  | 'conversion-proof';
 
 export function mapLegacyHeroVariant(raw: string): LandingPageHeroVariant {
   switch (raw) {
@@ -291,6 +315,13 @@ export function mapLegacyHeroVariant(raw: string): LandingPageHeroVariant {
     case 'floating-card':
     case 'split-left':
     case 'split-right':
+    case 'asymmetric':
+    case 'image-collage':
+    case 'product-screenshot':
+    case 'layered-cards':
+    case 'dark-cinematic':
+    case 'gradient-mesh':
+    case 'conversion-proof':
     case 'default':
       return raw as LandingPageHeroVariant;
     default:

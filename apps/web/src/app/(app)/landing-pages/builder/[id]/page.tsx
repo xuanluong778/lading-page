@@ -8,8 +8,8 @@ export default function LandingPageBuilderPage() {
   const pageId = params.id;
 
   return (
-    // Height is locked by AppShell (h-[100dvh] + overflow-hidden) on builder routes.
-    // Only the canvas column scrolls — toolbar stays pinned under the app header.
+    // AppShell locks height on /landing-pages/builder* (overflow-hidden + h-full chain)
+    // so only the canvas column scrolls — toolbar stays pinned under the app header.
     <div
       className={
         'flex h-full min-h-0 flex-1 flex-col overflow-hidden ' +

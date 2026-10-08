@@ -78,6 +78,8 @@ export function parseLpSelectionKey(key: string): LpSelectionTarget | null {
 export function elementFromField(field: string): LandingPageCanvasElementKey {
   if (field === 'ctaLabel') return 'cta';
   if (field === 'headline' || field === 'subheadline' || field === 'body') return field;
+  const trust = /^trustPoint:(\d+)$/.exec(field);
+  if (trust?.[1] != null) return `item:trust-${trust[1]}`;
   const m =
     /^(?:itemTitle|itemDesc|itemQuestion|itemAnswer|itemQuote|itemAuthor|planName|planPrice|planCta|fieldLabel):(.+)$/.exec(
       field,
@@ -98,9 +100,12 @@ export function isSectionToolbarElement(el?: LandingPageCanvasElementKey | null)
 }
 
 export function isTextToolbarTarget(target: LpSelectionTarget): boolean {
-  if (isSectionLevelElement(target.element)) return false;
   if (target.element === 'image') return false;
+  // Any inline text field (trustPoint:N, itemTitle:…, headline, …) shows the quick toolbar.
+  // Check field BEFORE section rejection — a stale elementFromField used to map
+  // trustPoint → 'section', which hid the toolbar despite a valid field selection.
   if (target.field) return true;
+  if (isSectionLevelElement(target.element)) return false;
   if (
     target.element === 'headline' ||
     target.element === 'subheadline' ||
@@ -110,7 +115,7 @@ export function isTextToolbarTarget(target: LpSelectionTarget): boolean {
     return true;
   }
   if (typeof target.element === 'string' && target.element.startsWith('item:')) {
-    return Boolean(target.field);
+    return false;
   }
   return false;
 }

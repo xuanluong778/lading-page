@@ -23,6 +23,9 @@ import {
   sanitizePositionMode,
   sanitizeResponsiveFreeLayout,
   ensureSectionFreeLayoutHeight,
+  expandBlocksToFitElementLayouts,
+  isFloatingTextLayerBlock,
+  reflowFreeSectionsAfterChange,
 } from './landing-page-free-position';
 import {
   AGENCY_PREMIUM_STANDARDS,
@@ -229,6 +232,7 @@ export function createEmptyLandingPageSpec(theme: LandingPageTheme = 'MODERN'): 
         subheadline: 'Một câu hỗ trợ ngắn gọn, rõ lợi ích.',
         ctaLabel: 'Đăng ký ngay',
         ctaUrl: '#lead-form',
+        trustPoints: ['Tư vấn rõ ràng', 'Phản hồi nhanh', 'Cam kết minh bạch'],
         imageUrl: null,
       },
       {
@@ -472,6 +476,30 @@ export function sanitizeLandingPageSpec(
     theme,
   );
 
+  const fittedBlocks = expandBlocksToFitElementLayouts(
+    blocks,
+    elementFreeLayouts,
+    'desktop',
+  );
+  let packedBlocks = fittedBlocks;
+  // Pack only real free sections — never run global pack seeded by a floating
+  // Heading/Paragraph text layer (that rewrote every free x/y on each sanitize).
+  const firstStackableFree = fittedBlocks.find(
+    (b) =>
+      b.positionMode === 'free' &&
+      b.freeLayout &&
+      !isFloatingTextLayerBlock(b),
+  );
+  if (firstStackableFree?.freeLayout) {
+    packedBlocks = reflowFreeSectionsAfterChange(
+      fittedBlocks,
+      firstStackableFree.id,
+      firstStackableFree.freeLayout,
+      ensureSectionFreeLayoutHeight(firstStackableFree.freeLayout),
+      'desktop',
+    );
+  }
+
   return {
     version: 1,
     theme,
@@ -483,7 +511,7 @@ export function sanitizeLandingPageSpec(
       ogImage: draftUrl(seoIn.ogImage),
       robotsIndex: seoIn.robotsIndex !== false,
     },
-    blocks,
+    blocks: packedBlocks,
     ...(metaIn
       ? {
           meta: {

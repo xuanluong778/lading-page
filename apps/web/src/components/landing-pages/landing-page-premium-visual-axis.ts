@@ -179,8 +179,8 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
 }
 [data-lp-design-family="minimal"] [data-lp-canvas-root],
 [data-lp-canvas-root][data-lp-design-family="minimal"] {
-  --lp-heading-font: "Oswald", "Inter", sans-serif;
-  --lp-body-font: "Inter", "Segoe UI", system-ui, sans-serif;
+  --lp-heading-font: "DM Sans", "Inter", system-ui, sans-serif;
+  --lp-body-font: "DM Sans", "Inter", system-ui, sans-serif;
 }
 [data-lp-design-family="luxury"] [data-lp-canvas-root],
 [data-lp-canvas-root][data-lp-design-family="luxury"] {
@@ -188,11 +188,14 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
   --lp-body-font: "Manrope", "DM Sans", system-ui, sans-serif;
 }
 [data-lp-design-family="bold"] [data-lp-canvas-root],
-[data-lp-canvas-root][data-lp-design-family="bold"],
-[data-lp-design-family="conversion"] [data-lp-canvas-root],
-[data-lp-canvas-root][data-lp-design-family="conversion"] {
+[data-lp-canvas-root][data-lp-design-family="bold"] {
   --lp-heading-font: "Oswald", "Inter", sans-serif;
   --lp-body-font: "Inter", "Segoe UI", system-ui, sans-serif;
+}
+[data-lp-design-family="conversion"] [data-lp-canvas-root],
+[data-lp-canvas-root][data-lp-design-family="conversion"] {
+  --lp-heading-font: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+  --lp-body-font: "Inter", "Plus Jakarta Sans", system-ui, sans-serif;
 }
 [data-lp-design-family="organic"] [data-lp-canvas-root],
 [data-lp-canvas-root][data-lp-design-family="organic"] {
@@ -211,13 +214,13 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
 }
 [data-lp-design-family="local"] [data-lp-canvas-root],
 [data-lp-canvas-root][data-lp-design-family="local"] {
-  --lp-heading-font: "Plus Jakarta Sans", "Manrope", sans-serif;
+  --lp-heading-font: "Manrope", "Plus Jakarta Sans", system-ui, sans-serif;
   --lp-body-font: "Manrope", "Plus Jakarta Sans", system-ui, sans-serif;
 }
 [data-lp-design-family="product"] [data-lp-canvas-root],
 [data-lp-canvas-root][data-lp-design-family="product"] {
-  --lp-heading-font: "Space Grotesk", "Inter", sans-serif;
-  --lp-body-font: "Inter", "DM Sans", system-ui, sans-serif;
+  --lp-heading-font: "Space Grotesk", "DM Sans", system-ui, sans-serif;
+  --lp-body-font: "DM Sans", "Inter", system-ui, sans-serif;
 }
 [data-lp-canvas-root] [data-lp-hero-copy] h1,
 [data-lp-canvas-root] [data-lp-section-head] h2,
@@ -231,12 +234,38 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
   overflow-wrap: break-word;
   max-width: 100%;
 }
+[data-lp-canvas-root] h1,
+[data-lp-canvas-root] [data-lp-hero-copy] h1 {
+  font-size: var(--lp-fs-hero, clamp(1.95rem, 4.5vw, 3.25rem));
+}
+[data-lp-canvas-root] h2,
+[data-lp-canvas-root] [data-lp-section-head] h2 {
+  font-size: clamp(1.35rem, 2.7vw, 1.95rem);
+}
+[data-lp-canvas-root] h3,
+[data-lp-canvas-root] [data-lp-card-item] h3 {
+  font-family: var(--lp-heading-font, inherit);
+  font-size: clamp(1.05rem, 1.8vw, 1.25rem);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
 [data-lp-canvas-root] [data-lp-hero-copy] p,
 [data-lp-canvas-root] [data-lp-section-head] p,
 [data-lp-canvas-root] [data-lp-card-item] p,
-[data-lp-canvas-root] body,
 [data-lp-canvas-root] {
   font-family: var(--lp-body-font, inherit);
+  font-weight: var(--lp-fw-body, 400);
+  line-height: var(--lp-lh-body, 1.6);
+}
+[data-lp-canvas-root] button[type="submit"],
+[data-lp-canvas-root] [data-lp-cta-primary],
+[data-lp-canvas-root] a[data-lp-cta-primary],
+[data-lp-canvas-root] .lp-btn-primary {
+  font-family: var(--lp-body-font, inherit);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--lp-on-primary, #fff);
 }
 [data-lp-canvas-root] [data-lp-section-eyebrow],
 [data-lp-canvas-root] [data-lp-hero-copy] [data-lp-inline-field="eyebrow"],
@@ -252,6 +281,54 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
   font-size: var(--lp-fs-hero, clamp(2rem, 4.8vw, 3.25rem));
   line-height: 1.08;
 }
+/* Text selection hug — never inherit section/flex stretch or locked freeLayout height */
+[data-lp-canvas-root] [data-lp-text-hug="1"],
+[data-lp-canvas-root] [data-lp-heading-auto-height="1"] {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  align-self: flex-start !important;
+  justify-self: start !important;
+  flex: 0 0 auto !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+/* Wrap always shrink-wraps the painted text box — never a wider parent frame */
+[data-lp-canvas-root] [data-lp-text-hug="1"][data-lp-heading-resize="1"]:not([data-lp-heading-width-live]) {
+  width: max-content !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+[data-lp-canvas-root] [data-lp-text-hug="1"] [data-lp-inline-field] {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+/* Builder only: theme mt/max-w on the text node must not inflate selection chrome */
+[data-lp-builder-root] [data-lp-text-hug="1"] [data-lp-inline-field],
+[data-lp-canvas-ux] [data-lp-text-hug="1"] [data-lp-inline-field] {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  max-width: none !important;
+}
+/*
+ * Locked text-box width must live on the painted text node so background/padding
+ * chips grow with resize. Beats element custom CSS width:fit-content !important
+ * (scoped in buildPageCustomCssBlocks) which previously left the orange wrap
+ * wider than the blue visual box.
+ */
+[data-lp-builder-root] [data-lp-text-hug="1"][data-lp-heading-width-locked="1"] [data-lp-inline-field],
+[data-lp-canvas-ux] [data-lp-text-hug="1"][data-lp-heading-width-locked="1"] [data-lp-inline-field],
+[data-lp-builder-root] [data-lp-text-hug="1"][data-lp-heading-width-live] [data-lp-inline-field],
+[data-lp-canvas-ux] [data-lp-text-hug="1"][data-lp-heading-width-live] [data-lp-inline-field] {
+  width: var(--lp-text-box-width) !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  display: block !important;
+  box-sizing: border-box !important;
+}
 [data-lp-canvas-root] [data-lp-section-head] h2 {
   font-size: clamp(1.375rem, 2.6vw, 2rem);
 }
@@ -259,7 +336,7 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
 /* ═══ Hero prominence ═══ */
 [data-lp-canvas-root] [data-lp-block-slot]:has([data-lp-hero-copy]) section,
 [data-lp-canvas-root] [data-lp-block-slot]:has([data-lp-hero-copy]) header {
-  min-height: min(44vh, 480px);
+  min-height: min(36vh, 420px);
   /* Kill stacked top padding (section py-* + foundation padding-block) —
      was rendering as a dead white band above hero copy on blank LPs. */
   padding-top: 0 !important;
@@ -292,6 +369,10 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
   letter-spacing: -0.035em;
   line-height: 1.08;
 }
+[data-lp-canvas-root] [data-lp-variant="minimal-copy"] [data-lp-hero-cta],
+[data-lp-canvas-root] [data-lp-variant="centered"] [data-lp-hero-cta] {
+  justify-content: center;
+}
 [data-lp-canvas-root] [data-lp-variant="centered"] [data-lp-hero-copy] {
   padding-top: 0;
   padding-bottom: clamp(2.25rem, 5.5vw, 4rem);
@@ -299,6 +380,7 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
   margin-inline: auto;
   max-width: min(var(--lp-text-width, 42rem), 100%);
 }
+
 [data-lp-canvas-root] [data-lp-variant="split-left"] [data-lp-hero-grid],
 [data-lp-canvas-root] [data-lp-variant="split-right"] [data-lp-hero-grid] {
   padding-top: 0;
@@ -493,9 +575,8 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
   color: #f1f5f9 !important;
 }
 
-/* Light tones — never inherit white hero/section text (dark themes too) */
-[data-lp-canvas-root] [data-lp-section-tone="canvas"] [data-lp-hero-copy] h1,
-[data-lp-canvas-root] [data-lp-section-tone="surface"] [data-lp-hero-copy] h1,
+/* Forced-light painted tones (hardcoded hex bg) — always dark text.
+   canvas/surface bind to theme vars and can be dark → use theme text below. */
 [data-lp-canvas-root] [data-lp-section-tone="cream"] [data-lp-hero-copy] h1,
 [data-lp-canvas-root] [data-lp-section-tone="cream"] [data-lp-section-head] h2,
 [data-lp-canvas-root] [data-lp-section-tone="editorial"] [data-lp-hero-copy] h1,
@@ -512,18 +593,22 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
 [data-lp-canvas-root] [data-lp-section-tone="warm"] [data-lp-section-head] h2,
 [data-lp-canvas-root] [data-lp-section-tone="trust"] [data-lp-hero-copy] h1,
 [data-lp-canvas-root] [data-lp-section-tone="trust"] [data-lp-section-head] h2,
+[data-lp-canvas-root] [data-lp-section-tone="sage"] [data-lp-hero-copy] h1,
 [data-lp-canvas-root] [data-lp-section-tone="sage"] [data-lp-section-head] h2,
+[data-lp-canvas-root] [data-lp-section-tone="craft"] [data-lp-hero-copy] h1,
 [data-lp-canvas-root] [data-lp-section-tone="craft"] [data-lp-section-head] h2,
+[data-lp-canvas-root] [data-lp-section-tone="showcase"] [data-lp-hero-copy] h1,
 [data-lp-canvas-root] [data-lp-section-tone="showcase"] [data-lp-section-head] h2,
+[data-lp-canvas-root] [data-lp-section-tone="corporate"] [data-lp-hero-copy] h1,
 [data-lp-canvas-root] [data-lp-section-tone="corporate"] [data-lp-section-head] h2,
+[data-lp-canvas-root] [data-lp-section-tone="local"] [data-lp-hero-copy] h1,
 [data-lp-canvas-root] [data-lp-section-tone="local"] [data-lp-section-head] h2,
+[data-lp-canvas-root] [data-lp-section-tone="dev"] [data-lp-hero-copy] h1,
+[data-lp-canvas-root] [data-lp-section-tone="dev"] [data-lp-section-head] h2,
 [data-lp-category="cosmetics"] [data-lp-section-tone="glow"] [data-lp-hero-copy] h1,
-[data-lp-category="cosmetics"] [data-lp-section-tone="glow"] [data-lp-section-head] h2,
-[data-lp-canvas-root] [data-lp-section-tone="glow"] [data-lp-section-head] h2 {
-  color: var(--lp-text-on-light, #0f172a) !important;
+[data-lp-category="cosmetics"] [data-lp-section-tone="glow"] [data-lp-section-head] h2 {
+  color: #0f172a !important;
 }
-[data-lp-canvas-root] [data-lp-section-tone="canvas"] [data-lp-hero-copy] p,
-[data-lp-canvas-root] [data-lp-section-tone="surface"] [data-lp-hero-copy] p,
 [data-lp-canvas-root] [data-lp-section-tone="cream"] [data-lp-hero-copy] p,
 [data-lp-canvas-root] [data-lp-section-tone="cream"] [data-lp-section-head] p,
 [data-lp-canvas-root] [data-lp-section-tone="editorial"] [data-lp-hero-copy] p,
@@ -540,15 +625,54 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
 [data-lp-canvas-root] [data-lp-section-tone="warm"] [data-lp-section-head] p,
 [data-lp-canvas-root] [data-lp-section-tone="trust"] [data-lp-hero-copy] p,
 [data-lp-canvas-root] [data-lp-section-tone="trust"] [data-lp-section-head] p,
+[data-lp-canvas-root] [data-lp-section-tone="sage"] [data-lp-hero-copy] p,
 [data-lp-canvas-root] [data-lp-section-tone="sage"] [data-lp-section-head] p,
+[data-lp-canvas-root] [data-lp-section-tone="craft"] [data-lp-hero-copy] p,
 [data-lp-canvas-root] [data-lp-section-tone="craft"] [data-lp-section-head] p,
+[data-lp-canvas-root] [data-lp-section-tone="showcase"] [data-lp-hero-copy] p,
 [data-lp-canvas-root] [data-lp-section-tone="showcase"] [data-lp-section-head] p,
+[data-lp-canvas-root] [data-lp-section-tone="corporate"] [data-lp-hero-copy] p,
 [data-lp-canvas-root] [data-lp-section-tone="corporate"] [data-lp-section-head] p,
+[data-lp-canvas-root] [data-lp-section-tone="local"] [data-lp-hero-copy] p,
 [data-lp-canvas-root] [data-lp-section-tone="local"] [data-lp-section-head] p,
+[data-lp-canvas-root] [data-lp-section-tone="dev"] [data-lp-hero-copy] p,
+[data-lp-canvas-root] [data-lp-section-tone="dev"] [data-lp-section-head] p,
 [data-lp-category="cosmetics"] [data-lp-section-tone="glow"] [data-lp-hero-copy] p,
-[data-lp-category="cosmetics"] [data-lp-section-tone="glow"] [data-lp-section-head] p,
-[data-lp-canvas-root] [data-lp-section-tone="glow"] [data-lp-section-head] p {
-  color: var(--lp-muted-on-light, #475569) !important;
+[data-lp-category="cosmetics"] [data-lp-section-tone="glow"] [data-lp-section-head] p {
+  color: #475569 !important;
+}
+[data-lp-canvas-root] [data-lp-section-tone="corporate"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="local"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="trust"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="data"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="clinical"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="warm"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="organic"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="beauty"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="editorial"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="cream"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="showcase"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="sage"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="craft"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="dev"] [data-lp-hero-trust] {
+  color: #334155 !important;
+}
+/* Theme-bound canvas/surface — follow theme tokens (light OR dark catalogs) */
+[data-lp-canvas-root] [data-lp-section-tone="canvas"] [data-lp-hero-copy] h1,
+[data-lp-canvas-root] [data-lp-section-tone="surface"] [data-lp-hero-copy] h1,
+[data-lp-canvas-root] [data-lp-section-tone="canvas"] [data-lp-section-head] h2,
+[data-lp-canvas-root] [data-lp-section-tone="surface"] [data-lp-section-head] h2 {
+  color: var(--lp-text, #0f172a) !important;
+}
+[data-lp-canvas-root] [data-lp-section-tone="canvas"] [data-lp-hero-copy] p,
+[data-lp-canvas-root] [data-lp-section-tone="surface"] [data-lp-hero-copy] p,
+[data-lp-canvas-root] [data-lp-section-tone="canvas"] [data-lp-section-head] p,
+[data-lp-canvas-root] [data-lp-section-tone="surface"] [data-lp-section-head] p {
+  color: var(--lp-muted, #475569) !important;
+}
+[data-lp-canvas-root] [data-lp-section-tone="canvas"] [data-lp-hero-trust],
+[data-lp-canvas-root] [data-lp-section-tone="surface"] [data-lp-hero-trust] {
+  color: var(--lp-text, #0f172a) !important;
 }
 
 /* Responsive — keep axis on tablet/mobile */
@@ -570,5 +694,275 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
   [data-lp-canvas-root] [data-lp-hero-copy] h1 {
     font-size: clamp(1.75rem, 8vw, 2.35rem);
   }
+}
+
+/* ═══ v24 Premium production polish — hero / CTA / icon / image / motion ═══ */
+[data-lp-canvas-root] {
+  --lp-card-shadow-elevated: var(--lp-shadow-md, 0 12px 36px rgba(15, 23, 42, 0.1));
+  --lp-cta-gradient: linear-gradient(
+    135deg,
+    var(--lp-primary) 0%,
+    color-mix(in srgb, var(--lp-primary) 55%, var(--lp-accent, var(--lp-secondary))) 100%
+  );
+}
+/* Hero mesh / atmospheric depth on every hero slot */
+[data-lp-canvas-root] [data-lp-block-slot]:has([data-lp-hero-copy]) [data-lp-section-chrome] > section,
+[data-lp-canvas-root] [data-lp-block-slot]:has([data-lp-hero-copy]) [data-lp-section-chrome] > header {
+  position: relative;
+  isolation: isolate;
+}
+[data-lp-canvas-root] [data-lp-block-slot]:has([data-lp-hero-copy]) [data-lp-section-chrome] > section::before,
+[data-lp-canvas-root] [data-lp-block-slot]:has([data-lp-hero-copy]) [data-lp-section-chrome] > header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 55% at 92% 8%, color-mix(in srgb, var(--lp-primary) 16%, transparent) 0%, transparent 62%),
+    radial-gradient(ellipse 55% 45% at 6% 88%, color-mix(in srgb, var(--lp-accent, var(--lp-secondary)) 12%, transparent) 0%, transparent 58%);
+  opacity: 0.95;
+}
+[data-lp-canvas-root] [data-lp-block-slot]:has([data-lp-hero-copy]) [data-lp-container-inner],
+[data-lp-canvas-root] [data-lp-block-slot]:has([data-lp-hero-copy]) [data-lp-hero-grid],
+[data-lp-canvas-root] [data-lp-block-slot]:has([data-lp-hero-copy]) [data-lp-hero-copy] {
+  position: relative;
+  z-index: 1;
+}
+/* Controlled gradient text — opt-in via data attr or first strong keyword span */
+[data-lp-canvas-root] [data-lp-gradient-text],
+[data-lp-canvas-root] [data-lp-hero-copy] [data-lp-inline-field="subheadline"] em,
+[data-lp-canvas-root] [data-lp-hero-copy] h1 mark {
+  background: linear-gradient(
+    105deg,
+    var(--lp-primary) 0%,
+    color-mix(in srgb, var(--lp-primary) 40%, var(--lp-accent, #a855f7)) 55%,
+    var(--lp-accent, var(--lp-secondary)) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-style: normal;
+}
+/* Hero image frame — premium focal */
+[data-lp-canvas-root] [data-lp-hero-visual] img,
+[data-lp-canvas-root] [data-lp-hero-visual] [data-lp-content-image],
+[data-lp-canvas-root] [data-lp-hero-visual] > div:has(img) {
+  border-radius: var(--lp-image-radius, var(--lp-radius-lg, 16px));
+  box-shadow:
+    0 24px 56px color-mix(in srgb, var(--lp-primary) 14%, rgba(15, 23, 42, 0.22)),
+    0 0 0 1px color-mix(in srgb, var(--lp-border, #e2e8f0) 70%, transparent);
+  transition: transform 0.35s ease, box-shadow 0.35s ease;
+}
+[data-lp-canvas-root] [data-lp-hero-visual]:hover img,
+[data-lp-canvas-root] [data-lp-hero-visual]:hover [data-lp-content-image] {
+  transform: scale(1.012);
+}
+/* Primary CTA — brand gradient fill + glow */
+[data-lp-canvas-root] [data-lp-hero-cta] a:first-child,
+[data-lp-canvas-root] [data-lp-cta-band] a:first-of-type,
+[data-lp-canvas-root] [data-lp-form-card] button[type="submit"] {
+  background: var(--lp-cta-gradient) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow:
+    0 10px 28px color-mix(in srgb, var(--lp-primary) 38%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 22%, transparent);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+[data-lp-canvas-root] [data-lp-hero-cta] a:first-child:hover,
+[data-lp-canvas-root] [data-lp-cta-band] a:first-of-type:hover,
+[data-lp-canvas-root] [data-lp-form-card] button[type="submit"]:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+  box-shadow: 0 14px 36px color-mix(in srgb, var(--lp-primary) 45%, transparent);
+}
+/* Secondary CTA — ghost / outline hierarchy */
+[data-lp-canvas-root] [data-lp-hero-cta] a:nth-child(2) {
+  background: transparent !important;
+  border: 1.5px solid color-mix(in srgb, var(--lp-text, #0f172a) 28%, transparent) !important;
+  color: var(--lp-text, #0f172a) !important;
+  box-shadow: none !important;
+}
+[data-lp-canvas-root] [data-lp-hero-cta] a:nth-child(2):hover {
+  border-color: var(--lp-primary) !important;
+  color: var(--lp-primary) !important;
+  background: color-mix(in srgb, var(--lp-primary) 6%, transparent) !important;
+  transform: translateY(-1px);
+}
+/* Icon bubble system */
+[data-lp-canvas-root] [data-lp-icon-bubble] {
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--lp-radius-md, 12px);
+  background: var(--lp-icon-surface) !important;
+  color: var(--lp-icon-color) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent),
+    0 6px 16px color-mix(in srgb, var(--lp-primary) 12%, transparent);
+}
+[data-lp-canvas-root] [data-lp-list-variant="icon-grid"] [data-lp-icon-bubble] {
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 14px;
+}
+/* Card padding / hierarchy polish */
+[data-lp-canvas-root] [data-lp-card-item] {
+  padding: clamp(1.1rem, 2.2vw, 1.45rem) !important;
+}
+[data-lp-canvas-root] [data-lp-card-item]:hover {
+  transform: translateY(-3px);
+}
+/* Dark canvas cards — multi-level surface */
+[data-lp-canvas-root][style*="--lp-bg: #0"],
+[data-lp-canvas-root][style*="--lp-bg:#0"] {
+  --lp-card-shadow-elevated: 0 12px 36px rgba(0, 0, 0, 0.35);
+}
+[data-lp-category="course"] [data-lp-canvas-root] [data-lp-hero-copy] h1,
+[data-lp-category="saas"] [data-lp-canvas-root] [data-lp-hero-copy] h1,
+[data-lp-category="webinar"] [data-lp-canvas-root] [data-lp-hero-copy] h1 {
+  letter-spacing: -0.035em;
+}
+/* Gallery / content images — industry frame */
+[data-lp-canvas-root] [data-lp-gallery-grid] img,
+[data-lp-canvas-root] [data-lp-content-image] {
+  border-radius: var(--lp-image-radius, var(--lp-radius-md, 12px));
+}
+[data-lp-category="restaurant"] [data-lp-canvas-root] [data-lp-hero-visual] img,
+[data-lp-category="spa"] [data-lp-canvas-root] [data-lp-hero-visual] img,
+[data-lp-category="cosmetics"] [data-lp-canvas-root] [data-lp-hero-visual] img {
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+}
+[data-lp-category="saas"] [data-lp-canvas-root] [data-lp-hero-visual] img,
+[data-lp-category="demo"] [data-lp-canvas-root] [data-lp-hero-visual] img {
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+}
+[data-lp-category="real_estate"] [data-lp-canvas-root] [data-lp-hero-visual] img {
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+/* PHASE 2 — premium hero composition shells */
+[data-lp-canvas-root] [data-lp-variant="asymmetric"] [data-lp-hero-bleed] [data-lp-hero-visual] img {
+  min-height: min(52vh, 520px);
+  aspect-ratio: 5 / 4;
+  object-fit: cover;
+}
+[data-lp-canvas-root] [data-lp-variant="image-collage"] [data-lp-hero-collage] [data-lp-hero-visual] img {
+  aspect-ratio: 16 / 10;
+  min-height: 220px;
+}
+[data-lp-canvas-root] [data-lp-variant="product-screenshot"] [data-lp-hero-screenshot] [data-lp-hero-visual] {
+  max-width: none;
+}
+[data-lp-canvas-root] [data-lp-variant="product-screenshot"] [data-lp-hero-screenshot] img {
+  aspect-ratio: 16 / 10;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+[data-lp-canvas-root] [data-lp-variant="layered-cards"] [data-lp-hero-layers] {
+  min-height: 280px;
+  padding: 1.25rem 0.75rem 1.5rem;
+}
+[data-lp-canvas-root] [data-lp-variant="dark-cinematic"] [data-lp-hero-on-dark] h1,
+[data-lp-canvas-root] [data-lp-variant="dark-cinematic"] [data-lp-hero-on-dark] [data-lp-inline-field="headline"] {
+  color: #F8FAFC !important;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.35);
+}
+[data-lp-canvas-root] [data-lp-variant="dark-cinematic"] [data-lp-hero-on-dark] p,
+[data-lp-canvas-root] [data-lp-variant="dark-cinematic"] [data-lp-hero-on-dark] [data-lp-inline-field="subheadline"] {
+  color: rgba(248, 250, 252, 0.82) !important;
+}
+[data-lp-canvas-root] [data-lp-variant="gradient-mesh"] {
+  isolation: isolate;
+}
+[data-lp-canvas-root] [data-lp-variant="conversion-proof"] [data-lp-hero-proof] {
+  margin-top: 0.25rem;
+}
+[data-lp-canvas-root] [data-lp-variant="editorial-overlay"] [data-lp-hero-overlay-bg] {
+  background-size: cover;
+  background-position: center;
+  filter: brightness(0.55) contrast(1.05);
+  min-height: min(58vh, 480px);
+}
+[data-lp-canvas-root] [data-lp-variant="editorial-overlay"] [data-lp-hero-overlay-bg]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    rgba(8, 10, 16, 0.78) 0%,
+    rgba(8, 10, 16, 0.42) 55%,
+    rgba(8, 10, 16, 0.2) 100%
+  );
+}
+[data-lp-canvas-root] [data-lp-variant="editorial-overlay"] [data-lp-container-inner] {
+  min-height: min(58vh, 480px);
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 2rem;
+}
+[data-lp-canvas-root] [data-lp-variant="editorial-overlay"] [data-lp-hero-copy] h1,
+[data-lp-canvas-root] [data-lp-variant="editorial-overlay"] [data-lp-hero-copy] [data-lp-inline-field="headline"] {
+  color: #F8FAFC !important;
+  max-width: 18ch;
+}
+[data-lp-canvas-root] [data-lp-variant="editorial-overlay"] [data-lp-hero-copy] p,
+[data-lp-canvas-root] [data-lp-variant="editorial-overlay"] [data-lp-hero-copy] [data-lp-inline-field="subheadline"] {
+  color: rgba(248, 250, 252, 0.88) !important;
+}
+[data-lp-canvas-root] [data-lp-variant="fullscreen-image"] [data-lp-hero-visual] img {
+  aspect-ratio: 21 / 9;
+  min-height: min(28vh, 280px);
+  width: 100%;
+  max-width: none;
+}
+@media (max-width: 768px) {
+  [data-lp-canvas-root] [data-lp-variant="editorial-overlay"] [data-lp-hero-overlay-bg],
+  [data-lp-canvas-root] [data-lp-variant="editorial-overlay"] [data-lp-container-inner] {
+    min-height: min(48vh, 360px);
+  }
+  [data-lp-canvas-root] [data-lp-variant="fullscreen-image"] [data-lp-hero-visual] img {
+    min-height: 160px;
+    aspect-ratio: 16 / 10;
+  }
+  [data-lp-canvas-root] [data-lp-variant="layered-cards"] [data-lp-hero-layers] {
+    min-height: 0;
+    padding: 0.5rem 0 1rem;
+  }
+  [data-lp-canvas-root] [data-lp-variant="dark-cinematic"] {
+    min-height: 0 !important;
+  }
+}
+/* Density — reduce empty wireframe whitespace on comfortable/spacious */
+[data-lp-canvas-root][data-lp-density="comfortable"] [data-lp-block-slot] > [data-lp-section-chrome] > section,
+[data-lp-canvas-root][data-lp-density="spacious"] [data-lp-block-slot] > [data-lp-section-chrome] > section {
+  padding-block: clamp(2.25rem, 4.5vw, 3.75rem);
+}
+[data-lp-canvas-root] [data-lp-variant="centered"] [data-lp-hero-visual] img,
+[data-lp-canvas-root] [data-lp-variant="centered"] [data-lp-content-image] {
+  max-height: none;
+  width: 100%;
+}
+/* Outline button style — intentional minimal premium (not missing gradient) */
+[data-lp-canvas-root] [data-lp-btn-style="outline"] [data-lp-hero-cta] a:first-child,
+[data-lp-canvas-root] [data-lp-btn-style="outline"] [data-lp-cta-band] a:first-of-type {
+  background: transparent !important;
+  border: 2px solid var(--lp-primary) !important;
+  color: var(--lp-primary) !important;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--lp-primary) 14%, transparent) !important;
+  font-weight: 700;
+}
+[data-lp-canvas-root] [data-lp-btn-style="outline"] [data-lp-hero-cta] a:first-child:hover,
+[data-lp-canvas-root] [data-lp-btn-style="outline"] [data-lp-cta-band] a:first-of-type:hover {
+  background: var(--lp-primary) !important;
+  color: #fff !important;
+  filter: none;
+}
+[data-lp-canvas-root] [data-lp-btn-style="outline"] [data-lp-form-card] button[type="submit"] {
+  background: var(--lp-primary) !important;
+  color: #fff !important;
+  border: none !important;
 }
 `.trim();

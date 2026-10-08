@@ -6,7 +6,11 @@ import {
   type PublicLandingPayload,
 } from '@/components/landing-pages/public-landing-page-client';
 
-export const revalidate = 60;
+// Host routing is dynamic. Do not cache the public resolve fetch:
+// Next's data cache only stores HTTP 200, so a later 404 would keep serving
+// the last published page forever (stale-while-revalidate never replaces it).
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 function apiBase(): string {
   const raw =
@@ -20,7 +24,7 @@ async function fetchByHost(host: string): Promise<PublicLandingPayload | null> {
   try {
     const res = await fetch(
       `${apiBase()}/api/v1/landing-pages/public/resolve-host?host=${encodeURIComponent(host)}`,
-      { next: { revalidate: 60, tags: [`lp-host-${host}`] } },
+      { cache: 'no-store' },
     );
     if (!res.ok) return null;
     return (await res.json()) as PublicLandingPayload;

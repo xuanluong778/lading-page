@@ -6,17 +6,22 @@
 
 import type { LandingPageBlock, LandingPageCategory } from './landing-page-types';
 import {
+  LANDING_PAGE_HERO_WIREFRAME,
   mapLegacyHeroVariant,
   resolveBlockVariant,
 } from './landing-page-template-foundation';
 import type { CtaStrategy } from './landing-page-cta-copy';
-import { getCategoryIndexOverrides } from './landing-page-category-visual-dna';
+import {
+  getCategoryHeroVariant,
+  getCategoryIndexOverrides,
+} from './landing-page-category-visual-dna';
 
 type ArchitectureSection = LandingPageBlock['type'];
 
 /** Index-aligned with SUFFIX/NAME in category-architectures (trust, pricing, process…). */
 const INDEX_VARIANT_PROFILES: Array<Partial<Record<LandingPageBlock['type'], string>>> = [
   {
+    Hero: 'asymmetric',
     Features: 'editorial-list',
     Process: 'timeline',
     Gallery: 'editorial-mosaic',
@@ -26,6 +31,7 @@ const INDEX_VARIANT_PROFILES: Array<Partial<Record<LandingPageBlock['type'], str
     LeadForm: 'card',
   },
   {
+    Hero: 'image-collage',
     Testimonials: 'cards',
     Features: 'icon-grid',
     Benefits: 'icon-grid',
@@ -34,6 +40,7 @@ const INDEX_VARIANT_PROFILES: Array<Partial<Record<LandingPageBlock['type'], str
     LeadForm: 'split',
   },
   {
+    Hero: 'conversion-proof',
     Pricing: 'comparison',
     Features: 'numbered',
     FAQ: 'two-column',
@@ -41,6 +48,7 @@ const INDEX_VARIANT_PROFILES: Array<Partial<Record<LandingPageBlock['type'], str
     LeadForm: 'compact',
   },
   {
+    Hero: 'layered-cards',
     Process: 'timeline',
     Features: 'numbered',
     Benefits: 'alternating',
@@ -49,6 +57,7 @@ const INDEX_VARIANT_PROFILES: Array<Partial<Record<LandingPageBlock['type'], str
     LeadForm: 'split',
   },
   {
+    Hero: 'fullscreen-image',
     Gallery: 'masonry',
     Features: 'image-cards',
     Testimonials: 'portrait-quotes',
@@ -57,6 +66,7 @@ const INDEX_VARIANT_PROFILES: Array<Partial<Record<LandingPageBlock['type'], str
     Pricing: 'cards',
   },
   {
+    Hero: 'gradient-mesh',
     Features: 'alternating',
     Process: 'steps',
     Benefits: 'minimal-list',
@@ -64,6 +74,7 @@ const INDEX_VARIANT_PROFILES: Array<Partial<Record<LandingPageBlock['type'], str
     LeadForm: 'split',
   },
   {
+    Hero: 'dark-cinematic',
     FAQ: 'accordion',
     Guarantee: 'banner',
     Features: 'editorial-list',
@@ -72,6 +83,7 @@ const INDEX_VARIANT_PROFILES: Array<Partial<Record<LandingPageBlock['type'], str
     LeadForm: 'card',
   },
   {
+    Hero: 'image-collage',
     Header: 'minimal',
     Features: 'icon-grid',
     Process: 'steps',
@@ -81,6 +93,7 @@ const INDEX_VARIANT_PROFILES: Array<Partial<Record<LandingPageBlock['type'], str
     Footer: 'columns',
   },
   {
+    Hero: 'floating-card',
     LeadForm: 'booking',
     Features: 'numbered',
     FAQ: 'accordion',
@@ -89,6 +102,7 @@ const INDEX_VARIANT_PROFILES: Array<Partial<Record<LandingPageBlock['type'], str
     Process: 'steps',
   },
   {
+    Hero: 'editorial-overlay',
     Features: 'minimal-list',
     Benefits: 'minimal-list',
     Testimonials: 'quote-centered',
@@ -193,7 +207,7 @@ const CATEGORY_INDEX_OVERRIDES: Partial<
     },
     { Testimonials: 'portrait-quotes', Guarantee: 'banner', LeadForm: 'split' },
     {
-      Hero: 'centered',
+      Hero: 'asymmetric',
       Video: 'default',
       Benefits: 'editorial-list',
       Features: 'editorial-list',
@@ -313,8 +327,19 @@ export function resolveCategoryBlockVariants(
   category: LandingPageCategory,
   arch: VariantPresetInput,
 ): Partial<Record<LandingPageBlock['type'], string>> {
+  const dnaHero = getCategoryHeroVariant(category, arch.variantIndex);
+  const indexOverride = {
+    ...(getCategoryIndexOverrides(category)?.[arch.variantIndex] || {}),
+    ...(CATEGORY_INDEX_OVERRIDES[category]?.[arch.variantIndex] || {}),
+  };
+
   if (category === 'spa' && arch.blockVariants && Object.keys(arch.blockVariants).length > 2) {
-    return arch.blockVariants;
+    const spa = { ...arch.blockVariants };
+    const spaHero = resolveBlockVariant('Hero', spa.Hero || mapLegacyHeroVariant(arch.heroVariant as never));
+    if (LANDING_PAGE_HERO_WIREFRAME.has(spaHero) || LANDING_PAGE_HERO_WIREFRAME.has(String(spa.Hero || ''))) {
+      spa.Hero = resolveBlockVariant('Hero', indexOverride.Hero || dnaHero);
+    }
+    return spa;
   }
 
   const seq = new Set(arch.sectionSequence);
@@ -361,11 +386,6 @@ export function resolveCategoryBlockVariants(
     profile.Pricing = arch.variantIndex === 2 ? 'comparison' : profile.Pricing || 'cards';
   }
 
-  const indexOverride = {
-    ...(getCategoryIndexOverrides(category)?.[arch.variantIndex] || {}),
-    ...(CATEGORY_INDEX_OVERRIDES[category]?.[arch.variantIndex] || {}),
-  };
-
   const merged: Partial<Record<LandingPageBlock['type'], string>> = {
     ...profile,
     ...nudge,
@@ -373,9 +393,14 @@ export function resolveCategoryBlockVariants(
     ...(arch.blockVariants || {}),
   };
 
-  merged.Hero =
-    arch.blockVariants?.Hero ||
-    resolveBlockVariant('Hero', mapLegacyHeroVariant(arch.heroVariant as never));
+  // PHASE 2: industry DNA / index Hero always wins — architecture heroVariant is fallback only.
+  // Keeps slug/architecture ids stable while composing distinct premium heroes.
+  const archHeroRaw =
+    arch.blockVariants?.Hero || mapLegacyHeroVariant(arch.heroVariant as never);
+  merged.Hero = resolveBlockVariant(
+    'Hero',
+    indexOverride.Hero || profile.Hero || dnaHero || archHeroRaw,
+  );
 
   if (seq.has('LeadForm')) {
     merged.LeadForm = resolveLeadFormVariant(

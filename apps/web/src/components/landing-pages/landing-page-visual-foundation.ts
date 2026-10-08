@@ -326,4 +326,9 @@ ${LP_FOOTER}:empty {
 [data-lp-viewport="mobile"] [data-lp-pricing-card][data-lp-featured="1"] {
   transform: none;
 }
+
+/* Builder: single vertical element toolbar (editor-only) */
+[data-lp-builder-vertical-toolbars="1"] [data-lp-floating-toolbar]:not([data-lp-element-vertical-toolbar]):not([data-lp-text-toolbar]) {
+  display: none !important;
+}
 `.trim();
