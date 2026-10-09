@@ -965,4 +965,64 @@ export const LP_PREMIUM_VISUAL_AXIS_CSS = `
   color: #fff !important;
   border: none !important;
 }
+/*
+ * Heading level (H1–H6) only changes the semantic tag. Contrast colors below
+ * were previously bound to h1/h2, so switching H1 → H2 dropped the white
+ * !important and the inline theme color (#0f172a) showed as black on dark heroes.
+ */
+[data-lp-canvas-root] [data-lp-section-tone="dark"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="authority"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="luxury"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-category="saas"] [data-lp-section-tone="glow"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-gold-standard="ai-modern"] [data-lp-section-tone="glow"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="dark"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="authority"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="luxury"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-category="saas"] [data-lp-section-tone="glow"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-gold-standard="ai-modern"] [data-lp-section-tone="glow"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-variant="editorial-overlay"] [data-lp-hero-copy] [data-lp-inline-field="headline"] {
+  color: #fafaf9 !important;
+}
+[data-lp-canvas-root] [data-lp-section-tone="accent"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="accent"] [data-lp-section-head] [data-lp-inline-field="headline"] {
+  color: #fff !important;
+}
+[data-lp-canvas-root] [data-lp-section-tone="cream"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="cream"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="editorial"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="editorial"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="beauty"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="beauty"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="organic"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="organic"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="data"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="data"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="clinical"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="clinical"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="warm"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="warm"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="trust"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="trust"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="sage"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="sage"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="craft"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="craft"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="showcase"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="showcase"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="corporate"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="corporate"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="local"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="local"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="dev"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="dev"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-category="cosmetics"] [data-lp-section-tone="glow"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-category="cosmetics"] [data-lp-section-tone="glow"] [data-lp-section-head] [data-lp-inline-field="headline"] {
+  color: #0f172a !important;
+}
+[data-lp-canvas-root] [data-lp-section-tone="canvas"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="surface"] [data-lp-hero-copy] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="canvas"] [data-lp-section-head] [data-lp-inline-field="headline"],
+[data-lp-canvas-root] [data-lp-section-tone="surface"] [data-lp-section-head] [data-lp-inline-field="headline"] {
+  color: var(--lp-text, #0f172a) !important;
+}
 `.trim();
